@@ -105,7 +105,7 @@ export function createFileRoutes(): Router {
   // Serve uploaded files
   router.get('/files/:filename', async (req, res) => {
     try {
-      const filename = req.params.filename;
+      const filename = String(req.params.filename);
       const filePath = path.join(UPLOADS_DIR, filename);
 
       // Security check: ensure filename doesn't contain path traversal
@@ -192,7 +192,7 @@ export function createFileRoutes(): Router {
   // Delete uploaded file
   router.delete('/files/:filename', async (req: AuthenticatedRequest, res) => {
     try {
-      const filename = req.params.filename;
+      const filename = String(req.params.filename);
 
       // Security check: ensure filename doesn't contain path traversal
       if (
