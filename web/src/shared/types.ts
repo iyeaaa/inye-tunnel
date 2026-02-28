@@ -274,6 +274,16 @@ export interface PushDeviceRegistration {
 }
 
 /**
+ * A persisted split group representing two sessions viewed side by side.
+ * Groups survive navigation and page refresh via localStorage.
+ */
+export interface SplitGroup {
+  id: string; // "group-" + Date.now()
+  sessionIds: [string, string]; // exactly 2
+  createdAt: number;
+}
+
+/**
  * Server status information
  */
 export interface ServerStatus {

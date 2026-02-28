@@ -6,7 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { keyed } from 'lit/directives/keyed.js';
 
 // Import shared types
-import type { Session } from '../shared/types.js';
+import type { Session, SplitGroup } from '../shared/types.js';
 import { HttpMethod } from '../shared/types.js';
 import { isBrowserShortcut } from './utils/browser-shortcuts.js';
 // Import utilities
@@ -84,6 +84,8 @@ export class VibeTunnelApp extends LitElement {
   @state() private activePaneIndex = 0;
   @state() private splitRatio = SPLIT_PANE.DEFAULT_RATIO;
   @state() private terminalDropZone: 'none' | 'left' | 'right' = 'none';
+  @state() private splitGroups: SplitGroup[] = this.loadSplitGroups();
+  private currentGroupId: string | null = null;
   private initialLoadComplete = false;
   private responsiveObserverInitialized = false;
   private initialRenderComplete = false;
@@ -750,6 +752,9 @@ export class VibeTunnelApp extends LitElement {
           this._cachedSelectedSessionId = null;
           this.clearError();
 
+          // Prune split groups whose sessions no longer exist
+          this.pruneStaleGroups();
+
           // Update page title if we're in list view
           if (this.currentView === 'list') {
             const sessionCount = this.sessions.length;
@@ -1114,11 +1119,12 @@ export class VibeTunnelApp extends LitElement {
   }
 
   private handleNavigateToList(): void {
-    // Exit split mode if active
+    // Exit split mode if active (group already persisted in enterSplitMode)
     if (this.isSplit) {
       this.splitPanes = [];
       this.activePaneIndex = 0;
       this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+      this.currentGroupId = null;
     }
 
     // Clean up the session view before navigating away
@@ -1319,6 +1325,114 @@ export class VibeTunnelApp extends LitElement {
       logger.error('error saving sidebar width:', error);
     }
   }
+
+  // --- Split group persistence ---
+
+  private loadSplitGroups(): SplitGroup[] {
+    try {
+      const saved = localStorage.getItem('splitGroups');
+      if (saved) {
+        const parsed = JSON.parse(saved) as SplitGroup[];
+        logger.debug('Loaded split groups from localStorage:', parsed.length);
+        return parsed;
+      }
+    } catch (error) {
+      logger.error('error loading split groups:', error);
+    }
+    return [];
+  }
+
+  private saveSplitGroups(): void {
+    try {
+      localStorage.setItem('splitGroups', JSON.stringify(this.splitGroups));
+      logger.debug('Saved split groups to localStorage:', this.splitGroups.length);
+    } catch (error) {
+      logger.error('error saving split groups:', error);
+    }
+  }
+
+  /**
+   * Create a new split group or reuse an existing one for the given session pair.
+   * Returns the group ID.
+   */
+  private createOrReuseGroup(leftSessionId: string, rightSessionId: string): string {
+    // Check if a group already exists for this pair (order-independent)
+    const existing = this.splitGroups.find(
+      (g) =>
+        (g.sessionIds[0] === leftSessionId && g.sessionIds[1] === rightSessionId) ||
+        (g.sessionIds[0] === rightSessionId && g.sessionIds[1] === leftSessionId)
+    );
+    if (existing) {
+      logger.debug(`Reusing existing split group: ${existing.id}`);
+      return existing.id;
+    }
+
+    const group: SplitGroup = {
+      id: `group-${Date.now()}`,
+      sessionIds: [leftSessionId, rightSessionId],
+      createdAt: Date.now(),
+    };
+    this.splitGroups = [...this.splitGroups, group];
+    this.saveSplitGroups();
+    logger.log(`Created split group: ${group.id} for sessions [${leftSessionId}, ${rightSessionId}]`);
+    return group.id;
+  }
+
+  /**
+   * Remove stale split groups whose sessions no longer exist.
+   */
+  private pruneStaleGroups(): void {
+    const sessionIds = new Set(this.sessions.map((s) => s.id));
+    const before = this.splitGroups.length;
+    const pruned = this.splitGroups.filter(
+      (g) => sessionIds.has(g.sessionIds[0]) && sessionIds.has(g.sessionIds[1])
+    );
+    if (pruned.length !== before) {
+      this.splitGroups = pruned;
+      this.saveSplitGroups();
+      logger.log(`Pruned ${before - pruned.length} stale split groups`);
+    }
+  }
+
+  /**
+   * Remove a specific split group by ID.
+   */
+  private removeSplitGroup(groupId: string): void {
+    const before = this.splitGroups.length;
+    this.splitGroups = this.splitGroups.filter((g) => g.id !== groupId);
+    if (this.splitGroups.length !== before) {
+      this.saveSplitGroups();
+      logger.log(`Removed split group: ${groupId}`);
+    }
+  }
+
+  /**
+   * Handle restoring a persisted split group from the home screen.
+   */
+  private handleRestoreSplitGroup = (e: CustomEvent) => {
+    const { groupId } = e.detail;
+    logger.log(`Restoring split group: ${groupId}`);
+
+    const group = this.splitGroups.find((g) => g.id === groupId);
+    if (!group) {
+      logger.warn(`Split group ${groupId} not found`);
+      return;
+    }
+
+    // Verify both sessions still exist
+    const leftExists = this.sessions.find((s) => s.id === group.sessionIds[0]);
+    const rightExists = this.sessions.find((s) => s.id === group.sessionIds[1]);
+    if (!leftExists || !rightExists) {
+      logger.warn(`Sessions for group ${groupId} no longer exist, removing group`);
+      this.removeSplitGroup(groupId);
+      return;
+    }
+
+    // Enter split mode with the group
+    this.enterSplitMode(group.sessionIds[0], group.sessionIds[1], groupId);
+    this.currentView = 'session';
+    this.updateUrl();
+  };
 
   private setupResponsiveObserver(): void {
     this.responsiveUnsubscribe = responsiveObserver.subscribe((state) => {
@@ -1536,7 +1650,13 @@ export class VibeTunnelApp extends LitElement {
         return;
       }
 
-      this.enterSplitMode(splitSessionIds.left, splitSessionIds.right);
+      // Look up existing group for this session pair
+      const existingGroup = this.splitGroups.find(
+        (g) =>
+          (g.sessionIds[0] === splitSessionIds.left && g.sessionIds[1] === splitSessionIds.right) ||
+          (g.sessionIds[0] === splitSessionIds.right && g.sessionIds[1] === splitSessionIds.left)
+      );
+      this.enterSplitMode(splitSessionIds.left, splitSessionIds.right, existingGroup?.id);
       this.currentView = 'session';
       this.requestUpdate();
     } else {
@@ -1692,15 +1812,19 @@ export class VibeTunnelApp extends LitElement {
 
   /**
    * Enter split mode with two existing sessions side by side.
-   * Used by drag-and-drop from sidebar or terminal drop zone.
+   * Used by drag-and-drop from sidebar, terminal drop zone, or restoring a split group.
+   * @param groupId Optional group ID to associate with this split (for restore scenarios).
    */
-  private enterSplitMode(leftSessionId: string, rightSessionId: string) {
-    logger.log(`Entering split mode: left=${leftSessionId}, right=${rightSessionId}`);
+  private enterSplitMode(leftSessionId: string, rightSessionId: string, groupId?: string) {
+    logger.log(`Entering split mode: left=${leftSessionId}, right=${rightSessionId}, groupId=${groupId || 'none'}`);
     this.splitPanes = [{ sessionId: leftSessionId }, { sessionId: rightSessionId }];
     this.activePaneIndex = 0;
     this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
     this.selectedSessionId = leftSessionId;
     this.terminalDropZone = 'none';
+
+    // Always persist the split group immediately on creation
+    this.currentGroupId = groupId ?? this.createOrReuseGroup(leftSessionId, rightSessionId);
 
     // After layout update, trigger terminal resize for both panes
     this.updateComplete.then(() => {
@@ -1715,6 +1839,12 @@ export class VibeTunnelApp extends LitElement {
 
   private handleCloseSplitPane(index: number) {
     if (!this.isSplit) return;
+
+    // Remove the persisted split group when explicitly closing split pane
+    if (this.currentGroupId) {
+      this.removeSplitGroup(this.currentGroupId);
+      this.currentGroupId = null;
+    }
 
     const remainingPane = this.splitPanes[index === 0 ? 1 : 0];
     if (remainingPane) {
@@ -1773,6 +1903,12 @@ export class VibeTunnelApp extends LitElement {
   private handleUnsplit(e: CustomEvent) {
     const { sessionId } = e.detail;
     logger.log(`Unsplit event: navigating to session=${sessionId}`);
+
+    // Remove the persisted split group when unsplitting
+    if (this.currentGroupId) {
+      this.removeSplitGroup(this.currentGroupId);
+      this.currentGroupId = null;
+    }
 
     this.splitPanes = [];
     this.activePaneIndex = 0;
@@ -2107,6 +2243,7 @@ export class VibeTunnelApp extends LitElement {
               .collapsed=${this.sidebarCollapsed}
               .authClient=${authClient}
               .splitSessionIds=${this.splitPanes.map((p) => p.sessionId)}
+              .splitGroups=${this.splitGroups}
               @session-killed=${this.handleSessionKilled}
               @refresh=${this.handleRefresh}
               @error=${this.handleError}
@@ -2118,6 +2255,7 @@ export class VibeTunnelApp extends LitElement {
               @split-with-session=${this.handleSplitWithSession}
               @unsplit=${this.handleUnsplit}
               @split-session-focus=${this.handleSplitSessionFocus}
+              @restore-split-group=${this.handleRestoreSplitGroup}
             ></session-list>
           </div>
         </div>

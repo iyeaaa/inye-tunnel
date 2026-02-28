@@ -19,7 +19,7 @@
 import { html, LitElement } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
-import type { Session } from '../../shared/types.js';
+import type { Session, SplitGroup } from '../../shared/types.js';
 import { HttpMethod } from '../../shared/types.js';
 import type { AuthClient } from '../services/auth-client.js';
 import type { Worktree } from '../services/git-service.js';
@@ -52,6 +52,7 @@ export class SessionList extends LitElement {
   @property({ type: Boolean }) compactMode = false;
   @property({ type: String }) activeSessionId: string | null = null;
   @property({ type: Array }) splitSessionIds: string[] = [];
+  @property({ type: Array }) splitGroups: SplitGroup[] = [];
 
   @state() private cleaningExited = false;
   @state() private repoFollowMode = new Map<string, string | undefined>();
@@ -756,9 +757,21 @@ export class SessionList extends LitElement {
 
     // Filter split sessions out of the normal list when in compact mode
     const splitIdSet = new Set(this.splitSessionIds);
+
+    // Collect session IDs that are part of persisted split groups (filter from both modes)
+    const persistedGroupSessionIds = new Set<string>();
+    for (const group of this.splitGroups) {
+      const leftExists = this.sessions.some((s) => s.id === group.sessionIds[0]);
+      const rightExists = this.sessions.some((s) => s.id === group.sessionIds[1]);
+      if (leftExists && rightExists) {
+        persistedGroupSessionIds.add(group.sessionIds[0]);
+        persistedGroupSessionIds.add(group.sessionIds[1]);
+      }
+    }
+
     const filteredSessions = this.compactMode
-      ? this.sessions.filter((s) => !splitIdSet.has(s.id))
-      : this.sessions;
+      ? this.sessions.filter((s) => !splitIdSet.has(s.id) && !persistedGroupSessionIds.has(s.id))
+      : this.sessions.filter((s) => !persistedGroupSessionIds.has(s.id));
 
     // Group sessions by status
     const runningSessions = filteredSessions.filter(
@@ -770,6 +783,9 @@ export class SessionList extends LitElement {
     const hasExitedSessions = exitedSessions.length > 0;
     const showExitedSection = !this.hideExited && hasExitedSessions;
 
+    // Check if there are any valid persisted split groups to show
+    const hasPersistedGroups = persistedGroupSessionIds.size > 0;
+
     // Track session index for numbering
     let sessionIndex = 0;
 
@@ -778,7 +794,7 @@ export class SessionList extends LitElement {
         ${this.renderActiveSessionInfo()}
         <div class="p-4 pt-5">
         ${
-          !hasRunningSessions && (!hasExitedSessions || this.hideExited)
+          !hasRunningSessions && (!hasExitedSessions || this.hideExited) && !hasPersistedGroups
             ? html`
               <div class="text-text-muted text-center py-8">
                 ${
@@ -852,7 +868,7 @@ export class SessionList extends LitElement {
               </div>
             `
             : html`
-              <!-- Split Group Card (shown when two sessions are in split view) -->
+              <!-- Split Group Card (shown when two sessions are in split view, compact mode) -->
               ${
                 isSplitActive && this.compactMode
                   ? html`
@@ -864,6 +880,35 @@ export class SessionList extends LitElement {
                         .leftSession=${splitLeft}
                         .rightSession=${splitRight}
                       ></split-group-card>
+                    </div>
+                  `
+                  : ''
+              }
+              <!-- Persisted Split Groups (shown in both compact and full mode) -->
+              ${
+                hasPersistedGroups
+                  ? html`
+                    <div class="mb-6 mt-2">
+                      <h3 class="text-xs font-semibold text-accent-primary uppercase tracking-wider mb-4">
+                        Split Groups <span class="text-text-dim">(${this.splitGroups.filter(
+                          (g) => persistedGroupSessionIds.has(g.sessionIds[0])
+                        ).length})</span>
+                      </h3>
+                      <div class="${this.compactMode ? '' : 'session-flex-responsive'}">
+                        ${this.splitGroups.map((group) => {
+                          const leftSession = this.sessions.find((s) => s.id === group.sessionIds[0]);
+                          const rightSession = this.sessions.find((s) => s.id === group.sessionIds[1]);
+                          if (!leftSession || !rightSession) return html``;
+                          return html`
+                            <split-group-card
+                              .leftSession=${leftSession}
+                              .rightSession=${rightSession}
+                              .mode=${'persisted'}
+                              .groupId=${group.id}
+                            ></split-group-card>
+                          `;
+                        })}
+                      </div>
                     </div>
                   `
                   : ''
