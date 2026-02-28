@@ -26,6 +26,7 @@ import type { Worktree } from '../services/git-service.js';
 import './session-card.js';
 import './inline-edit.js';
 import './session-list/compact-session-card.js';
+import './session-list/split-group-card.js';
 import './session-list/repository-header.js';
 import './clickable-path.js';
 import './git-status-badge.js';
@@ -50,6 +51,7 @@ export class SessionList extends LitElement {
   @property({ type: String }) selectedSessionId: string | null = null;
   @property({ type: Boolean }) compactMode = false;
   @property({ type: String }) activeSessionId: string | null = null;
+  @property({ type: Array }) splitSessionIds: string[] = [];
 
   @state() private cleaningExited = false;
   @state() private repoFollowMode = new Map<string, string | undefined>();
@@ -741,11 +743,28 @@ export class SessionList extends LitElement {
   }
 
   render() {
+    // Resolve split session objects from IDs
+    const splitLeft =
+      this.splitSessionIds.length === 2
+        ? this.sessions.find((s) => s.id === this.splitSessionIds[0])
+        : undefined;
+    const splitRight =
+      this.splitSessionIds.length === 2
+        ? this.sessions.find((s) => s.id === this.splitSessionIds[1])
+        : undefined;
+    const isSplitActive = !!splitLeft && !!splitRight;
+
+    // Filter split sessions out of the normal list when in compact mode
+    const splitIdSet = new Set(this.splitSessionIds);
+    const filteredSessions = this.compactMode
+      ? this.sessions.filter((s) => !splitIdSet.has(s.id))
+      : this.sessions;
+
     // Group sessions by status
-    const runningSessions = this.sessions.filter(
+    const runningSessions = filteredSessions.filter(
       (session) => session.status === 'running' || session.status === 'starting'
     );
-    const exitedSessions = this.sessions.filter((session) => session.status === 'exited');
+    const exitedSessions = filteredSessions.filter((session) => session.status === 'exited');
 
     const hasRunningSessions = runningSessions.length > 0;
     const hasExitedSessions = exitedSessions.length > 0;
@@ -833,6 +852,22 @@ export class SessionList extends LitElement {
               </div>
             `
             : html`
+              <!-- Split Group Card (shown when two sessions are in split view) -->
+              ${
+                isSplitActive && this.compactMode
+                  ? html`
+                    <div class="mb-4 mt-2">
+                      <h3 class="text-xs font-semibold text-accent-primary uppercase tracking-wider mb-2">
+                        Split View
+                      </h3>
+                      <split-group-card
+                        .leftSession=${splitLeft}
+                        .rightSession=${splitRight}
+                      ></split-group-card>
+                    </div>
+                  `
+                  : ''
+              }
               <!-- Running Sessions -->
               ${
                 hasRunningSessions

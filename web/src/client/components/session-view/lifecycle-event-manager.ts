@@ -250,6 +250,11 @@ export class LifecycleEventManager extends ManagerEventEmitter {
       return;
     }
 
+    // Skip keyboard input when this pane is not the active capture target (split view)
+    if (!this.callbacks.getKeyboardCaptureActive()) {
+      return;
+    }
+
     // Check if IME input is focused - block keyboard events except for editing keys
     if (document.body.getAttribute('data-ime-input-focused') === 'true') {
       if (!isIMEAllowedKey(e)) {
@@ -257,8 +262,14 @@ export class LifecycleEventManager extends ManagerEventEmitter {
       }
     }
 
-    // Check if IME composition is active - InputManager handles this
-    if (document.body.getAttribute('data-ime-composing') === 'true') {
+    // Check if IME composition is active (e.g. Korean/Japanese/Chinese input)
+    // - e.isComposing: true during active composition
+    // - e.key === 'Process': IME is processing the keystroke (first keydown before isComposing becomes true)
+    // - keyCode 229: standard IME composition keyCode across all browsers/platforms
+    // - data-ime-composing: fallback attribute set by DesktopIMEInput
+    logger.debug('keyboardHandler IME check', { key: e.key, code: e.code, keyCode: e.keyCode, isComposing: e.isComposing });
+    if (e.isComposing || e.key === 'Process' || e.keyCode === 229 || document.body.getAttribute('data-ime-composing') === 'true') {
+      logger.debug('keyboardHandler blocked by IME check');
       return;
     }
 

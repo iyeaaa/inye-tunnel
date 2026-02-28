@@ -23,6 +23,7 @@ export interface InputManagerCallbacks {
   requestUpdate(): void;
   getKeyboardCaptureActive?(): boolean;
   getTerminalElement?(): Terminal | null; // For cursor position access
+  getTerminalContainer?(): HTMLElement | null; // For IME input positioning in split view
 }
 
 export class InputManager {
@@ -274,7 +275,8 @@ export class InputManager {
     }
 
     // Find the terminal container to position the IME input correctly
-    const terminalContainer = document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
+    // Use callback to get scoped container (supports split view with duplicate IDs)
+    const terminalContainer = this.callbacks?.getTerminalContainer?.() ?? document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
     if (!terminalContainer) {
       logger.warn('Terminal container not found, cannot setup IME input');
       return;
@@ -335,7 +337,9 @@ export class InputManager {
     }
 
     // Block keyboard events during IME composition
-    if (this.imeInput?.isComposingText()) {
+    // e.key === 'Process' catches the first keydown before isComposing becomes true
+    // e.keyCode === 229 is the standard IME composition keyCode across all browsers/platforms
+    if (e.isComposing || e.key === 'Process' || e.keyCode === 229 || this.imeInput?.isComposingText()) {
       return;
     }
 
@@ -644,6 +648,15 @@ export class InputManager {
       return true;
     }
 
+    // Allow split pane shortcuts to propagate to app.ts
+    const primaryModifier = isMacOS ? e.metaKey : e.ctrlKey;
+    if (primaryModifier && e.shiftKey && !e.altKey && (key === 'd' || key === 'w')) {
+      return true;
+    }
+    if (primaryModifier && !e.shiftKey && !e.altKey && (e.key === '[' || e.key === ']')) {
+      return true;
+    }
+
     // Get keyboard capture state
     const captureActive = this.callbacks?.getKeyboardCaptureActive?.() ?? true;
 
@@ -753,7 +766,7 @@ export class InputManager {
    * Force setup IME input without language checks (used when composition is detected)
    */
   private forceSetupIMEInput(): void {
-    const terminalContainer = document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
+    const terminalContainer = this.callbacks?.getTerminalContainer?.() ?? document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
     if (!terminalContainer) {
       logger.warn('Terminal container not found, cannot setup IME input');
       return;

@@ -2490,6 +2490,23 @@ body.initial-session-load .session-flex-responsive > session-card:nth-child(n + 
   }
 }
 
+/* Split pane active indicator */
+.split-pane-active {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* Split divider */
+.split-divider {
+  cursor: col-resize;
+  background: var(--color-border);
+  transition: background 0.15s;
+}
+.split-divider:hover,
+.split-divider.dragging {
+  background: var(--color-primary);
+}
+
 /* Landscape adjustments */
 @media (max-width: 768px) and (orientation: landscape) {
   .mobile-terminal-header {

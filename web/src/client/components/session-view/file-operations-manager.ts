@@ -260,6 +260,9 @@ export class FileOperationsManager {
 
   // Drag & Drop handlers
   handleDragOver(e: DragEvent): void {
+    // Ignore session drag-and-drop (used for split view)
+    if (e.dataTransfer?.types.includes('application/vt-session-id')) return;
+
     e.preventDefault();
     e.stopPropagation();
 
@@ -280,6 +283,9 @@ export class FileOperationsManager {
   }
 
   handleDragEnter(e: DragEvent): void {
+    // Ignore session drag-and-drop (used for split view)
+    if (e.dataTransfer?.types.includes('application/vt-session-id')) return;
+
     e.preventDefault();
     e.stopPropagation();
 
@@ -318,6 +324,9 @@ export class FileOperationsManager {
   }
 
   async handleDrop(e: DragEvent): Promise<void> {
+    // Ignore session drag-and-drop (used for split view)
+    if (e.dataTransfer?.types.includes('application/vt-session-id')) return;
+
     e.preventDefault();
     e.stopPropagation();
 

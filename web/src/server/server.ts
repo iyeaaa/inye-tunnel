@@ -1330,6 +1330,11 @@ export async function createApp(): Promise<AppInstance> {
     res.sendFile(path.join(publicPath, 'index.html'));
   });
 
+  // Handle /split/:leftId/:rightId route by serving the same index.html
+  app.get('/split/:leftId/:rightId', (_req, res) => {
+    res.sendFile(path.join(publicPath, 'index.html'));
+  });
+
   // Handle /file-browser route by serving the same index.html
   app.get('/file-browser', (_req, res) => {
     res.sendFile(path.join(publicPath, 'index.html'));

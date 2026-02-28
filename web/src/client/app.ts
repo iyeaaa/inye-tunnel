@@ -10,7 +10,14 @@ import type { Session } from '../shared/types.js';
 import { HttpMethod } from '../shared/types.js';
 import { isBrowserShortcut } from './utils/browser-shortcuts.js';
 // Import utilities
-import { BREAKPOINTS, SIDEBAR, TIMING, TRANSITIONS, Z_INDEX } from './utils/constants.js';
+import {
+  BREAKPOINTS,
+  SIDEBAR,
+  SPLIT_PANE,
+  TIMING,
+  TRANSITIONS,
+  Z_INDEX,
+} from './utils/constants.js';
 // Import logger
 import { createLogger } from './utils/logger.js';
 import { isIOS } from './utils/mobile-utils.js';
@@ -24,6 +31,7 @@ import './components/session-create-form.js';
 import './components/multiplexer-modal.js';
 import './components/session-list.js';
 import './components/session-view.js';
+import './components/split-pane-container.js';
 import './components/session-card.js';
 import './components/file-browser.js';
 import './components/log-viewer.js';
@@ -72,6 +80,10 @@ export class VibeTunnelApp extends LitElement {
   @state() private mediaState: MediaQueryState = responsiveObserver.getCurrentState();
   @state() private hasActiveOverlay = false;
   @state() private keyboardCaptureActive = true;
+  @state() private splitPanes: Array<{ sessionId: string }> = [];
+  @state() private activePaneIndex = 0;
+  @state() private splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+  @state() private terminalDropZone: 'none' | 'left' | 'right' = 'none';
   private initialLoadComplete = false;
   private responsiveObserverInitialized = false;
   private initialRenderComplete = false;
@@ -378,6 +390,36 @@ export class VibeTunnelApp extends LitElement {
     }
 
     // VibeTunnel-specific shortcuts below this line
+
+    // Split pane shortcuts (session view only)
+    if (this.currentView === 'session') {
+      const primaryModifier = isMacOS ? e.metaKey : e.ctrlKey;
+      const key = e.key.toLowerCase();
+
+      // Cmd+Shift+W / Ctrl+Shift+W: Close active split pane
+      if (primaryModifier && e.shiftKey && !e.altKey && key === 'w' && this.isSplit) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.handleCloseSplitPane(this.activePaneIndex);
+        return;
+      }
+
+      // Cmd+[ / Cmd+]: Switch active pane (Mac only; on other platforms use Ctrl)
+      if (primaryModifier && !e.shiftKey && !e.altKey && this.isSplit) {
+        if (e.key === '[') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.activePaneIndex = Math.max(0, this.activePaneIndex - 1);
+          return;
+        }
+        if (e.key === ']') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.activePaneIndex = Math.min(this.splitPanes.length - 1, this.activePaneIndex + 1);
+          return;
+        }
+      }
+    }
 
     // Handle Cmd+O / Ctrl+O to open file browser (only in list view)
     if ((e.metaKey || e.ctrlKey) && e.key === 'o' && this.currentView === 'list') {
@@ -1008,6 +1050,13 @@ export class VibeTunnelApp extends LitElement {
     const { sessionId } = e.detail;
     console.log('[App] handleNavigateToSession called with:', sessionId);
 
+    // Exit split mode when navigating to a single session via sidebar
+    if (this.isSplit) {
+      this.splitPanes = [];
+      this.activePaneIndex = 0;
+      this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+    }
+
     // Clean up any existing session view stream before switching
     if (this.selectedSessionId !== sessionId) {
       this.cleanupSessionViewStream();
@@ -1065,6 +1114,13 @@ export class VibeTunnelApp extends LitElement {
   }
 
   private handleNavigateToList(): void {
+    // Exit split mode if active
+    if (this.isSplit) {
+      this.splitPanes = [];
+      this.activePaneIndex = 0;
+      this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+    }
+
     // Clean up the session view before navigating away
     this.cleanupSessionViewStream();
 
@@ -1398,6 +1454,12 @@ export class VibeTunnelApp extends LitElement {
       sessionId = pathParts[1];
     }
 
+    // Check for /split/:leftId/:rightId pattern
+    let splitSessionIds: { left: string; right: string } | null = null;
+    if (pathParts.length === 3 && pathParts[0] === 'split') {
+      splitSessionIds = { left: pathParts[1], right: pathParts[2] };
+    }
+
     // Only check authentication if we haven't initialized yet
     // This prevents duplicate auth checks during initial load
     if (!this.initialLoadComplete && !this.isAuthenticated) {
@@ -1453,6 +1515,30 @@ export class VibeTunnelApp extends LitElement {
         selectedSessionId: this.selectedSessionId,
         sessionLoadingState: this.sessionLoadingState,
       });
+    } else if (splitSessionIds) {
+      logger.log(
+        `Navigating to split view: left=${splitSessionIds.left}, right=${splitSessionIds.right}`
+      );
+
+      if (this.sessions.length === 0 && this.isAuthenticated) {
+        await this.loadSessions();
+      }
+
+      const leftExists = this.sessions.find((s) => s.id === splitSessionIds.left);
+      const rightExists = this.sessions.find((s) => s.id === splitSessionIds.right);
+
+      if (!leftExists || !rightExists) {
+        const missing = !leftExists ? splitSessionIds.left : splitSessionIds.right;
+        logger.warn(`Session ${missing} not found for split view`);
+        this.showError(`Session ${missing} not found`);
+        this.selectedSessionId = null;
+        this.currentView = 'list';
+        return;
+      }
+
+      this.enterSplitMode(splitSessionIds.left, splitSessionIds.right);
+      this.currentView = 'session';
+      this.requestUpdate();
     } else {
       this.selectedSessionId = null;
       this.currentView = 'list';
@@ -1468,6 +1554,10 @@ export class VibeTunnelApp extends LitElement {
     if (this.currentView === 'file-browser') {
       // Use path-based URL for file-browser view
       url.pathname = '/file-browser';
+    } else if (this.isSplit && this.splitPanes.length === 2) {
+      // Use path-based URL for split view
+      url.pathname = `/split/${this.splitPanes[0].sessionId}/${this.splitPanes[1].sessionId}`;
+      logger.log(`updateUrl: split view URL set to ${url.pathname}`);
     } else if (sessionId) {
       // Use path-based URL for session view
       url.pathname = `/session/${sessionId}`;
@@ -1545,6 +1635,184 @@ export class VibeTunnelApp extends LitElement {
 
   private get showSplitView(): boolean {
     return this.currentView === 'session' && this.selectedSessionId !== null;
+  }
+
+  private get isSplit(): boolean {
+    return this.splitPanes.length > 1;
+  }
+
+  // --- Terminal drop zone handlers ---
+
+  private handleTerminalDragOver(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes('application/vt-session-id')) return;
+    if (this.isSplit) return; // Already in split mode
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    // Determine left/right half based on cursor position
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const midX = rect.left + rect.width / 2;
+    this.terminalDropZone = e.clientX < midX ? 'left' : 'right';
+  }
+
+  private handleTerminalDragLeave(e: DragEvent) {
+    // Only reset if actually leaving the container (not entering a child)
+    const target = e.currentTarget as HTMLElement;
+    const relatedTarget = e.relatedTarget as Node | null;
+    if (relatedTarget && target.contains(relatedTarget)) return;
+    this.terminalDropZone = 'none';
+  }
+
+  private handleTerminalDrop(e: DragEvent) {
+    e.preventDefault();
+    const draggedSessionId = e.dataTransfer?.getData('application/vt-session-id');
+    const zone = this.terminalDropZone;
+    this.terminalDropZone = 'none';
+
+    if (!draggedSessionId || !this.selectedSessionId) return;
+    if (draggedSessionId === this.selectedSessionId) {
+      logger.debug('Terminal drop: same session, ignoring');
+      return;
+    }
+
+    logger.log(
+      `Terminal drop: dragged=${draggedSessionId}, current=${this.selectedSessionId}, zone=${zone}`
+    );
+
+    // Enter split mode: if dropped on left side, dragged goes left; otherwise right
+    if (zone === 'left') {
+      this.enterSplitMode(draggedSessionId, this.selectedSessionId);
+    } else {
+      this.enterSplitMode(this.selectedSessionId, draggedSessionId);
+    }
+    this.updateUrl();
+  }
+
+  /**
+   * Enter split mode with two existing sessions side by side.
+   * Used by drag-and-drop from sidebar or terminal drop zone.
+   */
+  private enterSplitMode(leftSessionId: string, rightSessionId: string) {
+    logger.log(`Entering split mode: left=${leftSessionId}, right=${rightSessionId}`);
+    this.splitPanes = [{ sessionId: leftSessionId }, { sessionId: rightSessionId }];
+    this.activePaneIndex = 0;
+    this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+    this.selectedSessionId = leftSessionId;
+    this.terminalDropZone = 'none';
+
+    // After layout update, trigger terminal resize for both panes
+    this.updateComplete.then(() => {
+      for (const pane of this.splitPanes) {
+        const container = this.querySelector(`#split-pane-${pane.sessionId}`) as HTMLElement;
+        if (container) {
+          triggerTerminalResize(pane.sessionId, container);
+        }
+      }
+    });
+  }
+
+  private handleCloseSplitPane(index: number) {
+    if (!this.isSplit) return;
+
+    const remainingPane = this.splitPanes[index === 0 ? 1 : 0];
+    if (remainingPane) {
+      this.selectedSessionId = remainingPane.sessionId;
+      // Trigger terminal resize for the remaining session after layout update
+      this.updateComplete.then(() => {
+        triggerTerminalResize(remainingPane.sessionId, this);
+      });
+    }
+
+    this.splitPanes = [];
+    this.activePaneIndex = 0;
+    this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+    this.updateUrl(this.selectedSessionId || undefined);
+    logger.log(`Closed split pane at index ${index}`);
+  }
+
+  private handlePaneFocus(e: CustomEvent) {
+    const { index } = e.detail;
+    this.activePaneIndex = index;
+    logger.debug(`Active pane changed to ${index}`);
+  }
+
+  private handleSplitResize(e: CustomEvent) {
+    const { ratio } = e.detail;
+    this.splitRatio = ratio;
+  }
+
+  /**
+   * Handle drag-and-drop split request from sidebar card.
+   * Fires when a session card is dropped onto another card.
+   */
+  private handleSplitWithSession(e: CustomEvent) {
+    const { draggedSessionId, targetSessionId } = e.detail;
+    logger.log(`Split-with-session event: target=${targetSessionId}, dragged=${draggedSessionId}`);
+
+    if (this.isSplit) {
+      logger.log('Already in split mode, ignoring split-with-session');
+      return;
+    }
+
+    // Enter split mode with the target on the left, dragged on the right
+    this.enterSplitMode(targetSessionId, draggedSessionId);
+
+    // Switch to session view if not already there
+    if (this.currentView !== 'session') {
+      this.currentView = 'session';
+    }
+    this.updateUrl();
+  }
+
+  /**
+   * Handle unsplit request from split-group-card.
+   * Exits split mode and navigates to the specified session.
+   */
+  private handleUnsplit(e: CustomEvent) {
+    const { sessionId } = e.detail;
+    logger.log(`Unsplit event: navigating to session=${sessionId}`);
+
+    this.splitPanes = [];
+    this.activePaneIndex = 0;
+    this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+    this.terminalDropZone = 'none';
+
+    if (sessionId) {
+      this.selectedSessionId = sessionId;
+    }
+    this.updateUrl(this.selectedSessionId || undefined);
+
+    // Trigger terminal resize for the remaining session
+    this.updateComplete.then(() => {
+      if (this.selectedSessionId) {
+        triggerTerminalResize(this.selectedSessionId, this);
+      }
+    });
+  }
+
+  /**
+   * Handle session focus from split-group-card.
+   * Navigates to the specified session in single-pane mode.
+   */
+  private handleSplitSessionFocus(e: CustomEvent) {
+    const { sessionId } = e.detail;
+    logger.log(`Split-session-focus event: sessionId=${sessionId}`);
+
+    // Exit split mode and navigate to the focused session
+    this.splitPanes = [];
+    this.activePaneIndex = 0;
+    this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;
+    this.terminalDropZone = 'none';
+    this.selectedSessionId = sessionId;
+    this.currentView = 'session';
+    this.updateUrl(sessionId);
+
+    // Trigger terminal resize
+    this.updateComplete.then(() => {
+      triggerTerminalResize(sessionId, this);
+    });
   }
 
   private get selectedSession(): Session | undefined {
@@ -1838,6 +2106,7 @@ export class VibeTunnelApp extends LitElement {
               .compactMode=${showSplitView}
               .collapsed=${this.sidebarCollapsed}
               .authClient=${authClient}
+              .splitSessionIds=${this.splitPanes.map((p) => p.sessionId)}
               @session-killed=${this.handleSessionKilled}
               @refresh=${this.handleRefresh}
               @error=${this.handleError}
@@ -1846,6 +2115,9 @@ export class VibeTunnelApp extends LitElement {
               @navigate-to-session=${this.handleNavigateToSession}
               @open-file-browser=${this.handleOpenFileBrowser}
               @open-create-dialog=${this.handleOpenCreateDialog}
+              @split-with-session=${this.handleSplitWithSession}
+              @unsplit=${this.handleUnsplit}
+              @split-session-focus=${this.handleSplitSessionFocus}
             ></session-list>
           </div>
         </div>
@@ -1869,29 +2141,76 @@ export class VibeTunnelApp extends LitElement {
         <!-- Main content area -->
         ${
           showSplitView
-            ? html`
-              <div class="flex-1 relative sm:static transition-none">
-                ${keyed(
-                  this.selectedSessionId,
-                  html`
-                    <session-view
-                      .session=${selectedSession}
-                      .showBackButton=${false}
-                      .showSidebarToggle=${true}
-                      .sidebarCollapsed=${this.sidebarCollapsed}
-                      .disableFocusManagement=${this.hasActiveOverlay}
-                      .keyboardCaptureActive=${this.keyboardCaptureActive}
-                      @navigate-to-list=${this.handleNavigateToList}
-                      @toggle-sidebar=${this.handleToggleSidebar}
-                      @create-session=${this.handleCreateSession}
-                      @session-status-changed=${this.handleSessionStatusChanged}
-                      @open-settings=${this.handleOpenSettings}
-                      @capture-toggled=${this.handleCaptureToggled}
-                    ></session-view>
-                  `
-                )}
-              </div>
-            `
+            ? this.isSplit
+              ? html`
+                <div class="flex-1 relative sm:static transition-none h-full">
+                  <split-pane-container
+                    .panes=${this.splitPanes.map((p) => ({
+                      sessionId: p.sessionId,
+                      session: this.sessions.find((s) => s.id === p.sessionId),
+                    }))}
+                    .activePaneIndex=${this.activePaneIndex}
+                    .splitRatio=${this.splitRatio}
+                    .showBackButton=${false}
+                    .showSidebarToggle=${true}
+                    .sidebarCollapsed=${this.sidebarCollapsed}
+                    .disableFocusManagement=${this.hasActiveOverlay}
+                    .keyboardCaptureActive=${this.keyboardCaptureActive}
+                    @pane-focus=${this.handlePaneFocus}
+                    @pane-close=${(e: CustomEvent) => this.handleCloseSplitPane(e.detail.index)}
+                    @split-resize=${this.handleSplitResize}
+                    @navigate-to-list=${this.handleNavigateToList}
+                    @toggle-sidebar=${this.handleToggleSidebar}
+                    @create-session=${this.handleCreateSession}
+                    @session-status-changed=${this.handleSessionStatusChanged}
+                    @open-settings=${this.handleOpenSettings}
+                    @capture-toggled=${this.handleCaptureToggled}
+                  ></split-pane-container>
+                </div>
+              `
+              : html`
+                <div
+                  class="flex-1 relative sm:static transition-none"
+                  @dragover=${this.handleTerminalDragOver}
+                  @dragleave=${this.handleTerminalDragLeave}
+                  @drop=${this.handleTerminalDrop}
+                >
+                  ${keyed(
+                    this.selectedSessionId,
+                    html`
+                      <session-view
+                        .session=${selectedSession}
+                        .showBackButton=${false}
+                        .showSidebarToggle=${true}
+                        .sidebarCollapsed=${this.sidebarCollapsed}
+                        .disableFocusManagement=${this.hasActiveOverlay}
+                        .keyboardCaptureActive=${this.keyboardCaptureActive}
+                        @navigate-to-list=${this.handleNavigateToList}
+                        @toggle-sidebar=${this.handleToggleSidebar}
+                        @create-session=${this.handleCreateSession}
+                        @session-status-changed=${this.handleSessionStatusChanged}
+                        @open-settings=${this.handleOpenSettings}
+                        @capture-toggled=${this.handleCaptureToggled}
+                      ></session-view>
+                    `
+                  )}
+                  <!-- Terminal drop zone overlay -->
+                  ${
+                    this.terminalDropZone !== 'none'
+                      ? html`
+                        <div class="absolute inset-0 pointer-events-none flex" style="z-index: ${Z_INDEX.MODAL}">
+                          <div class="flex-1 ${this.terminalDropZone === 'left' ? 'bg-accent-primary/20 border-2 border-accent-primary border-dashed' : 'bg-transparent'} transition-all rounded-l-lg m-2 flex items-center justify-center">
+                            ${this.terminalDropZone === 'left' ? html`<span class="text-accent-primary text-sm font-semibold">Left</span>` : ''}
+                          </div>
+                          <div class="flex-1 ${this.terminalDropZone === 'right' ? 'bg-accent-primary/20 border-2 border-accent-primary border-dashed' : 'bg-transparent'} transition-all rounded-r-lg m-2 flex items-center justify-center">
+                            ${this.terminalDropZone === 'right' ? html`<span class="text-accent-primary text-sm font-semibold">Right</span>` : ''}
+                          </div>
+                        </div>
+                      `
+                      : ''
+                  }
+                </div>
+              `
             : ''
         }
       </div>

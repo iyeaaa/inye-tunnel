@@ -3,20 +3,25 @@
  *
  * A compact list item representation of a session for sidebar/compact views.
  * Handles different session states (running, exited) with appropriate styling.
+ * Supports drag-and-drop for split view creation.
  *
  * @fires session-select - When card is clicked (detail: Session)
  * @fires session-rename - When session is renamed (detail: { sessionId: string, newName: string })
  * @fires session-delete - When session delete is requested (detail: { sessionId: string })
  * @fires session-cleanup - When exited session cleanup is requested (detail: { sessionId: string })
+ * @fires split-with-session - When a session is dropped onto this card (detail: { draggedSessionId: string, targetSessionId: string })
  */
 import { html, LitElement } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import type { Session } from '../../../shared/types.js';
 import { formatSessionDuration } from '../../../shared/utils/time.js';
 import type { AuthClient } from '../../services/auth-client.js';
 import { sessionActionService } from '../../services/session-action-service.js';
+import { createLogger } from '../../utils/logger.js';
 import { formatPathForDisplay } from '../../utils/path-utils.js';
 import '../inline-edit.js';
+
+const logger = createLogger('compact-session-card');
 
 @customElement('compact-session-card')
 export class CompactSessionCard extends LitElement {
@@ -30,6 +35,66 @@ export class CompactSessionCard extends LitElement {
   @property({ type: Boolean }) selected = false;
   @property({ type: String }) sessionType: 'running' | 'exited' = 'running';
   @property({ type: Number }) sessionNumber?: number;
+
+  @state() private isDragOver = false;
+
+  // --- Drag source handlers ---
+
+  private handleDragStart(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData('application/vt-session-id', this.session.id);
+    e.dataTransfer.effectAllowed = 'move';
+    // Visual feedback: make the dragged card semi-transparent
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add('opacity-50');
+    logger.debug(`Drag started for session ${this.session.id}`);
+  }
+
+  private handleDragEnd(e: DragEvent) {
+    // Remove semi-transparent styling when drag ends
+    const target = e.currentTarget as HTMLElement;
+    target.classList.remove('opacity-50');
+    logger.debug(`Drag ended for session ${this.session.id}`);
+  }
+
+  // --- Drop target handlers ---
+
+  private handleDragOver(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes('application/vt-session-id')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    this.isDragOver = true;
+  }
+
+  private handleDragLeave(_e: DragEvent) {
+    this.isDragOver = false;
+  }
+
+  private handleDrop(e: DragEvent) {
+    e.preventDefault();
+    this.isDragOver = false;
+
+    const draggedSessionId = e.dataTransfer?.getData('application/vt-session-id');
+    if (!draggedSessionId) return;
+
+    // Guard: don't allow drop on self
+    if (draggedSessionId === this.session.id) {
+      logger.debug('Drop on self ignored');
+      return;
+    }
+
+    logger.log(`Split requested: dragged=${draggedSessionId}, target=${this.session.id}`);
+    this.dispatchEvent(
+      new CustomEvent('split-with-session', {
+        detail: {
+          draggedSessionId,
+          targetSessionId: this.session.id,
+        },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
 
   private handleClick() {
     this.dispatchEvent(
@@ -178,11 +243,14 @@ export class CompactSessionCard extends LitElement {
       'p-3',
       'rounded-lg',
       'cursor-pointer',
-      this.selected
-        ? 'bg-bg-elevated border border-accent-primary shadow-card-hover'
-        : isExited
-          ? 'bg-bg-secondary border border-border hover:bg-bg-tertiary hover:border-border-light hover:shadow-card opacity-75'
-          : 'bg-bg-secondary border border-border hover:bg-bg-tertiary hover:border-border-light hover:shadow-card',
+      'transition-all',
+      this.isDragOver
+        ? 'bg-accent-primary/20 border-2 border-accent-primary border-dashed shadow-card-hover'
+        : this.selected
+          ? 'bg-bg-elevated border border-accent-primary shadow-card-hover'
+          : isExited
+            ? 'bg-bg-secondary border border-border hover:bg-bg-tertiary hover:border-border-light hover:shadow-card opacity-75'
+            : 'bg-bg-secondary border border-border hover:bg-bg-tertiary hover:border-border-light hover:shadow-card',
     ].join(' ');
 
     // Text color classes
@@ -195,7 +263,17 @@ export class CompactSessionCard extends LitElement {
     const pathColorClass = isExited ? 'text-text-dim' : 'text-text-muted';
 
     return html`
-      <div class="${cardClasses}" style="margin-bottom: 12px;" @click=${this.handleClick}>
+      <div
+        class="${cardClasses}"
+        style="margin-bottom: 12px;"
+        draggable="true"
+        @click=${this.handleClick}
+        @dragstart=${this.handleDragStart}
+        @dragend=${this.handleDragEnd}
+        @dragover=${this.handleDragOver}
+        @dragleave=${this.handleDragLeave}
+        @drop=${this.handleDrop}
+      >
         <!-- Session number and status indicator -->
         <div class="flex items-center gap-2 flex-shrink-0">
           ${

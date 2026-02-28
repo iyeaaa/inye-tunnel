@@ -66,6 +66,13 @@ export const TERMINAL = {
   RESIZE_DEBOUNCE: 100,
 } as const;
 
+export const SPLIT_PANE = {
+  MIN_WIDTH: 300,
+  DIVIDER_WIDTH: 6,
+  MAX_PANES: 2,
+  DEFAULT_RATIO: 0.5,
+} as const;
+
 export const TIMING = {
   AUTO_REFRESH_INTERVAL: 1000,
   SESSION_SEARCH_DELAY: 500,

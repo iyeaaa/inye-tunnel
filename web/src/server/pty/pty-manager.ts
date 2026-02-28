@@ -399,12 +399,16 @@ export class PtyManager extends EventEmitter {
       let ptyProcess: IPty;
       try {
         // Set up environment like Linux implementation
-        const ptyEnv = {
-          ...process.env,
-          TERM: term,
-          // Set session ID to prevent recursive vt calls and for debugging
-          VIBETUNNEL_SESSION_ID: sessionId,
-        };
+        // Strip Claude Code env vars so sessions don't appear as nested Claude Code
+        const ptyEnv = { ...process.env } as Record<string, string>;
+        for (const key of Object.keys(ptyEnv)) {
+          if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE_')) {
+            delete ptyEnv[key];
+          }
+        }
+        ptyEnv.TERM = term;
+        // Set session ID to prevent recursive vt calls and for debugging
+        ptyEnv.VIBETUNNEL_SESSION_ID = sessionId;
 
         // Debug log the spawn parameters
         logger.debug('PTY spawn parameters:', {

@@ -1,10 +1,10 @@
 {
-  "name": "vibetunnel",
+  "name": "inyetunnel",
   "version": "1.0.0-beta.16",
-  "description": "Terminal sharing server with web interface - supports macOS, Linux, and headless environments",
+  "description": "Terminal sharing server with web interface - fork of VibeTunnel with split view, Korean IME fixes, and more",
   "main": "dist/server/server.js",
   "bin": {
-    "vibetunnel": "./bin/vibetunnel"
+    "inyetunnel": "./bin/vibetunnel"
   },
   "files": [
     "dist/",
@@ -30,12 +30,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/amantus-ai/vibetunnel.git",
+    "url": "https://github.com/iyein/inye-tunnel.git",
     "directory": "web"
   },
-  "homepage": "https://vibetunnel.sh",
+  "homepage": "https://github.com/iyein/inye-tunnel",
   "bugs": {
-    "url": "https://github.com/amantus-ai/vibetunnel/issues"
+    "url": "https://github.com/iyein/inye-tunnel/issues"
   },
   "scripts": {
     "clean": "node scripts/clean.js",
