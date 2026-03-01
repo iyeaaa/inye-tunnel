@@ -130,13 +130,26 @@ export class CastOutputHub {
     logger.debug(chalk.yellow(`stopped cast watcher for session ${sessionId}`));
   }
 
-  private startWatchingWithRetry(sessionId: string, watcherInfo: WatcherInfo) {
+  private static readonly MAX_WATCH_RETRIES = 50; // 50 * 200ms = 10 seconds max
+
+  private startWatchingWithRetry(sessionId: string, watcherInfo: WatcherInfo, retryCount = 0) {
     if (watcherInfo.watcher) return;
 
     if (!fs.existsSync(watcherInfo.streamPath)) {
+      if (retryCount >= CastOutputHub.MAX_WATCH_RETRIES) {
+        logger.error(
+          `stdout file not found after ${retryCount} retries (${retryCount * 200}ms) for session ${sessionId}: ${watcherInfo.streamPath}`
+        );
+        // Clean up the watcher entry since we cannot watch a file that does not exist
+        this.stopWatching(sessionId);
+        return;
+      }
+      logger.debug(
+        `stdout file not found for session ${sessionId}, retry ${retryCount + 1}/${CastOutputHub.MAX_WATCH_RETRIES}`
+      );
       watcherInfo.retryTimer = setTimeout(() => {
         watcherInfo.retryTimer = undefined;
-        this.startWatchingWithRetry(sessionId, watcherInfo);
+        this.startWatchingWithRetry(sessionId, watcherInfo, retryCount + 1);
       }, 200);
       return;
     }

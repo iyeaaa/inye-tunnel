@@ -381,7 +381,22 @@ export class SessionManager {
           const sessionInfo = this.loadSessionInfo(sessionId);
           if (sessionInfo) {
             // Determine active state for running processes
-            if (sessionInfo.status === 'running' && sessionInfo.pid) {
+            if (
+              (sessionInfo.status === 'running' || sessionInfo.status === 'starting') &&
+              !sessionInfo.pid
+            ) {
+              // Session claims to be running/starting but has no pid - mark as exited
+              logger.debug(
+                chalk.yellow(
+                  `session ${sessionId} has status "${sessionInfo.status}" but no pid, marking as exited`
+                )
+              );
+              sessionInfo.status = 'exited';
+              if (sessionInfo.exitCode === undefined) {
+                sessionInfo.exitCode = 1;
+              }
+              this.saveSessionInfo(sessionId, sessionInfo);
+            } else if (sessionInfo.status === 'running' && sessionInfo.pid) {
               // Update status if process is no longer alive
               if (!ProcessUtils.isProcessRunning(sessionInfo.pid)) {
                 logger.debug(
@@ -521,11 +536,12 @@ export class SessionManager {
       for (const session of sessions) {
         if (!session.version) {
           // Only clean if the session is not actively running
-          if (
-            session.status === 'exited' ||
-            (session.pid && !ProcessUtils.isProcessRunning(session.pid))
-          ) {
-            logger.debug(`cleaning up legacy zombie session ${session.id} (no version field)`);
+          const isActive =
+            (session.status === 'running' || session.status === 'starting') &&
+            session.pid &&
+            ProcessUtils.isProcessRunning(session.pid);
+          if (!isActive) {
+            logger.debug(`cleaning up legacy zombie session ${session.id} (no version field, status: ${session.status}, pid: ${session.pid || 'none'})`);
             this.cleanupSession(session.id);
             cleanedCount++;
           } else {
@@ -557,13 +573,14 @@ export class SessionManager {
       for (const session of sessions) {
         // Only clean sessions that don't match the current version AND are not active
         if (!session.version || session.version !== currentVersion) {
-          // Check if session is actually dead/zombie
-          if (
-            session.status === 'exited' ||
-            (session.pid && !ProcessUtils.isProcessRunning(session.pid))
-          ) {
+          // A session is only truly active if it has a pid AND that process is running
+          const isActive =
+            (session.status === 'running' || session.status === 'starting') &&
+            session.pid &&
+            ProcessUtils.isProcessRunning(session.pid);
+          if (!isActive) {
             logger.debug(
-              `cleaning up zombie session ${session.id} (version: ${session.version || 'unknown'})`
+              `cleaning up zombie session ${session.id} (version: ${session.version || 'unknown'}, status: ${session.status}, pid: ${session.pid || 'none'})`
             );
             this.cleanupSession(session.id);
             cleanedCount++;

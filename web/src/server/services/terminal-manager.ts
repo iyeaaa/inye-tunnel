@@ -61,7 +61,12 @@ async function ensureGhostty(): Promise<Ghostty> {
       });
 
       return new Ghostty(instance);
-    })();
+    })().catch((error) => {
+      // Clear cached promise so the next call can retry WASM loading
+      logger.error('Failed to load ghostty WASM, clearing cached promise for retry:', error);
+      ghosttyPromise = null;
+      throw error;
+    });
   }
   return ghosttyPromise;
 }
@@ -1295,6 +1300,9 @@ export class TerminalManager {
       await this.getTerminal(sessionId);
     } catch (error) {
       logger.error(`Failed to init terminal for subscription ${truncateForLog(sessionId)}:`, error);
+      // Terminal is unavailable - return empty unsubscribe instead of continuing
+      // to call getBufferSnapshot() which would fail the same way
+      return () => {};
     }
 
     if (!this.bufferListeners.has(sessionId)) {
