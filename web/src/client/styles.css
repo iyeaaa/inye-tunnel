@@ -2513,13 +2513,342 @@ body.initial-session-load .session-flex-responsive > session-card:nth-child(n + 
     /* Compact header in landscape */
     padding-top: 0;
   }
-  
+
   .mobile-action-bar {
     /* Smaller action bar in landscape */
     padding: 0.25rem;
   }
-  
+
   .mobile-action-key {
     @apply py-1.5 text-xs;
   }
+}
+
+/* ======================================================== */
+/* Markdown Preview Styles                                  */
+/* ======================================================== */
+
+.markdown-preview {
+  color: var(--color-text);
+  line-height: 1.7;
+  word-wrap: break-word;
+  max-width: 860px;
+}
+
+/* Headings */
+.markdown-preview h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.markdown-preview h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.markdown-preview h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-preview h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-preview h5 {
+  font-size: 0.875em;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-preview h6 {
+  font-size: 0.85em;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-text-muted);
+}
+
+/* Paragraphs */
+.markdown-preview p {
+  margin-bottom: 1rem;
+}
+
+/* Links */
+.markdown-preview a {
+  color: var(--color-status-info);
+  text-decoration: none;
+}
+
+.markdown-preview a:hover {
+  text-decoration: underline;
+}
+
+/* Lists */
+.markdown-preview ul,
+.markdown-preview ol {
+  margin-bottom: 1rem;
+  padding-left: 2em;
+}
+
+.markdown-preview ul {
+  list-style-type: disc;
+}
+
+.markdown-preview ol {
+  list-style-type: decimal;
+}
+
+.markdown-preview li {
+  margin-bottom: 0.25rem;
+}
+
+.markdown-preview li > ul,
+.markdown-preview li > ol {
+  margin-top: 0.25rem;
+  margin-bottom: 0;
+}
+
+/* Inline code */
+.markdown-preview code {
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* Code blocks */
+.markdown-preview pre {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+
+.markdown-preview pre > code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+/* Blockquotes */
+.markdown-preview blockquote {
+  border-left: 4px solid var(--color-border);
+  padding: 0.5rem 1rem;
+  margin-bottom: 1rem;
+  color: var(--color-text-muted);
+}
+
+.markdown-preview blockquote > p:last-child {
+  margin-bottom: 0;
+}
+
+/* Horizontal rule */
+.markdown-preview hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 1.5rem 0;
+}
+
+/* Tables */
+.markdown-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+  font-size: 0.9em;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid var(--color-border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.markdown-preview th {
+  background: var(--color-bg-secondary);
+  font-weight: 600;
+}
+
+.markdown-preview tr:nth-child(even) {
+  background: var(--color-bg-secondary);
+}
+
+/* Images */
+.markdown-preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* Strong and emphasis */
+.markdown-preview strong {
+  font-weight: 600;
+}
+
+.markdown-preview em {
+  font-style: italic;
+}
+
+/* Strikethrough */
+.markdown-preview del,
+.markdown-preview s {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+
+/* Task lists (GFM checkboxes) */
+.markdown-preview input[type="checkbox"] {
+  margin-right: 0.5em;
+  vertical-align: middle;
+}
+
+/* Details / Summary */
+.markdown-preview details {
+  margin-bottom: 1rem;
+}
+
+.markdown-preview summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* ============================================ */
+/* Highlight.js token colors (theme-aware)     */
+/* ============================================ */
+
+/* Keywords (if, else, return, function, class, etc.) */
+.markdown-preview .hljs-keyword,
+.markdown-preview .hljs-selector-tag,
+.markdown-preview .hljs-built_in,
+.markdown-preview .hljs-type {
+  color: #c678dd;
+}
+
+/* Strings */
+.markdown-preview .hljs-string,
+.markdown-preview .hljs-attr,
+.markdown-preview .hljs-symbol,
+.markdown-preview .hljs-bullet {
+  color: #98c379;
+}
+
+/* Numbers */
+.markdown-preview .hljs-number,
+.markdown-preview .hljs-literal {
+  color: #d19a66;
+}
+
+/* Comments */
+.markdown-preview .hljs-comment,
+.markdown-preview .hljs-quote {
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+/* Function names and titles */
+.markdown-preview .hljs-title,
+.markdown-preview .hljs-section {
+  color: #61afef;
+}
+
+/* Variables, params */
+.markdown-preview .hljs-variable,
+.markdown-preview .hljs-params {
+  color: #e06c75;
+}
+
+/* HTML/XML tags and attributes */
+.markdown-preview .hljs-tag {
+  color: #e06c75;
+}
+
+.markdown-preview .hljs-name {
+  color: #e06c75;
+}
+
+.markdown-preview .hljs-attribute {
+  color: #d19a66;
+}
+
+/* Additions / deletions (diff) */
+.markdown-preview .hljs-addition {
+  color: var(--color-status-success);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.markdown-preview .hljs-deletion {
+  color: var(--color-status-error);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Meta / preprocessor */
+.markdown-preview .hljs-meta {
+  color: var(--color-text-muted);
+}
+
+/* Regex */
+.markdown-preview .hljs-regexp {
+  color: #56b6c2;
+}
+
+/* Light mode adjustments for highlight.js */
+:root:not(.dark) .markdown-preview .hljs-keyword,
+:root:not(.dark) .markdown-preview .hljs-selector-tag,
+:root:not(.dark) .markdown-preview .hljs-built_in,
+:root:not(.dark) .markdown-preview .hljs-type {
+  color: #a626a4;
+}
+
+:root:not(.dark) .markdown-preview .hljs-string,
+:root:not(.dark) .markdown-preview .hljs-attr,
+:root:not(.dark) .markdown-preview .hljs-symbol,
+:root:not(.dark) .markdown-preview .hljs-bullet {
+  color: #50a14f;
+}
+
+:root:not(.dark) .markdown-preview .hljs-number,
+:root:not(.dark) .markdown-preview .hljs-literal {
+  color: #986801;
+}
+
+:root:not(.dark) .markdown-preview .hljs-title,
+:root:not(.dark) .markdown-preview .hljs-section {
+  color: #4078f2;
+}
+
+:root:not(.dark) .markdown-preview .hljs-variable,
+:root:not(.dark) .markdown-preview .hljs-params {
+  color: #e45649;
+}
+
+:root:not(.dark) .markdown-preview .hljs-tag,
+:root:not(.dark) .markdown-preview .hljs-name {
+  color: #e45649;
+}
+
+:root:not(.dark) .markdown-preview .hljs-attribute {
+  color: #986801;
+}
+
+:root:not(.dark) .markdown-preview .hljs-regexp {
+  color: #0184bc;
 }

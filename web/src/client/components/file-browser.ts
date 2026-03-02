@@ -11,6 +11,7 @@
 import { html, LitElement } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { createRef, ref } from 'lit/directives/ref.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { Session } from '../../shared/types.js';
 import { authClient } from '../services/auth-client.js';
 import { Z_INDEX } from '../utils/constants.js';
@@ -22,6 +23,7 @@ import {
   UIIcons,
 } from '../utils/file-icons.js';
 import { createLogger } from '../utils/logger.js';
+import { renderMarkdown } from '../utils/markdown-renderer.js';
 import { copyToClipboard, formatPathForDisplay } from '../utils/path-utils.js';
 import './monaco-editor.js';
 import './modal-wrapper.js';
@@ -108,6 +110,7 @@ export class FileBrowser extends LitElement {
   @state() private isMobile = window.innerWidth < 768;
   @state() private editingPath = false;
   @state() private pathInputValue = '';
+  @state() private markdownRendered = true;
 
   private editorRef = createRef<HTMLElement>();
   private pathInputRef = createRef<HTMLInputElement>();
@@ -274,6 +277,7 @@ export class FileBrowser extends LitElement {
         this.diff = null;
         this.diffContent = null;
         this.showDiff = false;
+        this.markdownRendered = true;
       }
       // Set the selected file
       this.selectedFile = file;
@@ -388,6 +392,15 @@ export class FileBrowser extends LitElement {
     }
   }
 
+  private isMarkdownFile(): boolean {
+    return this.preview?.language === 'markdown';
+  }
+
+  private toggleMarkdownView() {
+    this.markdownRendered = !this.markdownRendered;
+    logger.debug(`markdown view toggled: markdownRendered=${this.markdownRendered}`);
+  }
+
   private handleSelect() {
     if (this.mode === 'select' && this.currentPath) {
       this.dispatchEvent(
@@ -437,6 +450,15 @@ export class FileBrowser extends LitElement {
         `;
 
       case 'text':
+        if (this.isMarkdownFile() && this.markdownRendered) {
+          logger.debug('rendering markdown preview');
+          const renderedHtml = renderMarkdown(this.preview.content || '');
+          return html`
+            <div class="markdown-preview overflow-auto h-full p-6">
+              ${unsafeHTML(renderedHtml)}
+            </div>
+          `;
+        }
         return html`
           <monaco-editor
             ${ref(this.editorRef)}
@@ -813,6 +835,22 @@ export class FileBrowser extends LitElement {
                                   `
                                   : ''
                               }
+                            `
+                            : ''
+                        }
+                        ${
+                          this.isMarkdownFile() && !this.showDiff
+                            ? html`
+                              <button
+                                class="btn-secondary text-xs px-2 py-1 font-mono ${
+                                  this.markdownRendered ? 'bg-primary text-bg' : ''
+                                }"
+                                @click=${this.toggleMarkdownView}
+                                title="Toggle between rendered markdown and source"
+                                id="markdown-toggle-button"
+                              >
+                                ${this.markdownRendered ? 'Source' : 'Rendered'}
+                              </button>
                             `
                             : ''
                         }
