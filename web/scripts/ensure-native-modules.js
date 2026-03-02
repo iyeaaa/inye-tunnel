@@ -63,7 +63,37 @@ if (fs.existsSync(symlinkNodePty) && fs.lstatSync(symlinkNodePty).isSymbolicLink
   }
 }
 
-console.log('Native modules are ready for tests');
+// Ensure local node-pty fork (web/node-pty/) has native binaries for production builds.
+// The bundled server (dist/vibetunnel-cli) requires node-pty from web/node-pty/,
+// which needs pty.node and spawn-helper in build/Release/ (or build/Debug/).
+const localNodePty = path.join(__dirname, '..', 'node-pty');
+if (fs.existsSync(localNodePty)) {
+  const localReleaseDir = path.join(localNodePty, 'build', 'Release');
+  const localDebugDir = path.join(localNodePty, 'build', 'Debug');
+  const nativeBinaries = ['pty.node', 'spawn-helper'];
+
+  for (const targetDir of [localReleaseDir, localDebugDir]) {
+    fs.mkdirSync(targetDir, { recursive: true });
+    for (const binary of nativeBinaries) {
+      const targetPath = path.join(targetDir, binary);
+      const sourcePath = path.join(releaseDir, binary);
+      if (fs.existsSync(sourcePath) && !fs.existsSync(targetPath)) {
+        try {
+          fs.copyFileSync(sourcePath, targetPath);
+          // Preserve executable permission for spawn-helper
+          if (binary === 'spawn-helper') {
+            fs.chmodSync(targetPath, 0o755);
+          }
+          console.log(`Copied ${binary} to ${targetDir}`);
+        } catch (e) {
+          console.warn(`Failed to copy ${binary} to ${targetDir}:`, e.message);
+        }
+      }
+    }
+  }
+}
+
+console.log('Native modules are ready');
 
 // Ensure zig forwarder exists (required now that Node forwarder is removed)
 const webRoot = path.join(__dirname, '..');
