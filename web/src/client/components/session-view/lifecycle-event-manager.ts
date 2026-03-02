@@ -267,8 +267,18 @@ export class LifecycleEventManager extends ManagerEventEmitter {
     // - e.key === 'Process': IME is processing the keystroke (first keydown before isComposing becomes true)
     // - keyCode 229: standard IME composition keyCode across all browsers/platforms
     // - data-ime-composing: fallback attribute set by DesktopIMEInput
-    logger.debug('keyboardHandler IME check', { key: e.key, code: e.code, keyCode: e.keyCode, isComposing: e.isComposing });
-    if (e.isComposing || e.key === 'Process' || e.keyCode === 229 || document.body.getAttribute('data-ime-composing') === 'true') {
+    logger.debug('keyboardHandler IME check', {
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      isComposing: e.isComposing,
+    });
+    if (
+      e.isComposing ||
+      e.key === 'Process' ||
+      e.keyCode === 229 ||
+      document.body.getAttribute('data-ime-composing') === 'true'
+    ) {
       logger.debug('keyboardHandler blocked by IME check');
       return;
     }
@@ -280,11 +290,14 @@ export class LifecycleEventManager extends ManagerEventEmitter {
       return;
     }
 
-    // Handle Cmd+O / Ctrl+O to open file browser
+    // Handle Cmd+O / Ctrl+O to toggle file browser
     if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
       // Stop propagation to prevent parent handlers from interfering with our file browser
       consumeEvent(e);
-      this.callbacks.setShowFileBrowser(true);
+      const currentState = this.callbacks.getShowFileBrowser();
+      const nextState = !currentState;
+      logger.debug(`Ctrl+O toggle file browser: ${currentState} -> ${nextState}`);
+      this.callbacks.setShowFileBrowser(nextState);
       return;
     }
 

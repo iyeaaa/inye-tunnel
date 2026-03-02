@@ -127,6 +127,7 @@ export class SessionView extends LitElement {
       setShowFileBrowser: (value: boolean) => {
         this.uiStateManager.setShowFileBrowser(value);
       },
+      getShowFileBrowser: () => this.uiStateManager.getState().showFileBrowser,
       getInputManager: () => this.inputManager,
       getShowWidthSelector: () => this.uiStateManager.getState().showWidthSelector,
       setShowWidthSelector: (value: boolean) => {
@@ -296,7 +297,8 @@ export class SessionView extends LitElement {
       requestUpdate: () => this.requestUpdate(),
       getKeyboardCaptureActive: () => this.uiStateManager.getState().keyboardCaptureActive,
       getTerminalElement: () => this.getTerminalElement(),
-      getTerminalContainer: () => this.querySelector(`#${TERMINAL_IDS.SESSION_TERMINAL}`) as HTMLElement | null,
+      getTerminalContainer: () =>
+        this.querySelector(`#${TERMINAL_IDS.SESSION_TERMINAL}`) as HTMLElement | null,
     });
 
     // Initialize direct keyboard manager

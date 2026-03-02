@@ -13,6 +13,7 @@ export interface StateCallbacks {
   setIsMobile(value: boolean): void;
   setShowQuickKeys(value: boolean): void;
   setShowFileBrowser(value: boolean): void;
+  getShowFileBrowser(): boolean;
   getShowWidthSelector(): boolean;
   setShowWidthSelector(value: boolean): void;
   setCustomWidth(value: string): void;

@@ -8,7 +8,7 @@
  * @fires directory-selected - When a directory is selected in 'select' mode (detail: string)
  * @fires browser-cancel - When the browser is cancelled or closed
  */
-import { html, LitElement } from 'lit';
+import { html, LitElement, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { createRef, ref } from 'lit/directives/ref.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
@@ -115,6 +115,7 @@ export class FileBrowser extends LitElement {
   private editorRef = createRef<HTMLElement>();
   private pathInputRef = createRef<HTMLInputElement>();
   private noAuthMode = false;
+  private savedScrollTop = 0;
 
   async connectedCallback() {
     super.connectedCallback();
@@ -131,15 +132,44 @@ export class FileBrowser extends LitElement {
     this.setupTouchHandlers();
   }
 
+  protected willUpdate(changedProperties: PropertyValues): void {
+    super.willUpdate(changedProperties);
+
+    // Save scroll position before the DOM is updated when hiding
+    if (changedProperties.has('visible')) {
+      const wasVisible = changedProperties.get('visible') as boolean | undefined;
+      if (wasVisible && !this.visible) {
+        const scrollContainer = this.querySelector('.overflow-y-auto');
+        if (scrollContainer) {
+          this.savedScrollTop = scrollContainer.scrollTop;
+          logger.debug(`File browser hiding - saved scroll position: ${this.savedScrollTop}`);
+        }
+      }
+    }
+  }
+
   async updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);
 
     // Only load directory when the component becomes visible or when session's workingDir actually changes
     if (changedProperties.has('visible')) {
       if (this.visible) {
-        // Component just became visible
-        this.currentPath = this.session?.workingDir || '.';
-        await this.loadDirectory(this.currentPath);
+        if (this.currentPath && this.currentFullPath) {
+          // Re-opening: refresh files from the preserved directory path
+          logger.debug(`File browser re-opening - restoring path: ${this.currentPath}`);
+          await this.loadDirectory(this.currentPath);
+          // Restore scroll position after the DOM has updated with fresh data
+          await this.updateComplete;
+          const scrollContainer = this.querySelector('.overflow-y-auto');
+          if (scrollContainer && this.savedScrollTop > 0) {
+            scrollContainer.scrollTop = this.savedScrollTop;
+            logger.debug(`File browser restored scroll position: ${this.savedScrollTop}`);
+          }
+        } else {
+          // First open: use session working directory
+          this.currentPath = this.session?.workingDir || '.';
+          await this.loadDirectory(this.currentPath);
+        }
       }
     } else if (changedProperties.has('session') && this.visible) {
       // Check if the workingDir actually changed
