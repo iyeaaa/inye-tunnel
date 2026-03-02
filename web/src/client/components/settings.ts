@@ -11,6 +11,8 @@ import {
 import { RepositoryService } from '../services/repository-service.js';
 import { ServerConfigService } from '../services/server-config-service.js';
 import { createLogger } from '../utils/logger.js';
+import { TerminalPreferencesManager } from '../utils/terminal-preferences.js';
+import { type TerminalThemeId, TERMINAL_THEMES } from '../utils/terminal-themes.js';
 import { VERSION } from '../version.js';
 
 const logger = createLogger('settings');
@@ -38,15 +40,20 @@ export class Settings extends LitElement {
   @state() private repositoryCount = 0;
   @state() private isDiscoveringRepositories = false;
 
+  // Terminal settings state
+  @state() private terminalTheme: TerminalThemeId = 'dracula';
+
   private permissionChangeUnsubscribe?: () => void;
   private subscriptionChangeUnsubscribe?: () => void;
   private repositoryService?: RepositoryService;
   private serverConfigService?: ServerConfigService;
+  private terminalPrefs = TerminalPreferencesManager.getInstance();
 
   connectedCallback() {
     super.connectedCallback();
     this.initializeNotifications();
     this.loadSettings();
+    this.terminalTheme = this.terminalPrefs.getTheme();
 
     // Initialize services
     this.serverConfigService = new ServerConfigService(this.authClient);
@@ -494,6 +501,7 @@ export class Settings extends LitElement {
 
           <!-- Content -->
           <div class="flex-1 overflow-y-auto p-4 space-y-6">
+            ${this.renderTerminalSettings()}
             ${this.renderNotificationSettings()}
             ${this.renderAppSettings()}
           </div>
@@ -682,6 +690,67 @@ export class Settings extends LitElement {
         </button>
       </div>
     `;
+  }
+
+  private renderTerminalSettings() {
+    return html`
+      <div class="space-y-4">
+        <h3 class="text-md font-bold text-primary mb-3">Terminal</h3>
+
+        <!-- Theme -->
+        <div class="p-4 bg-bg-tertiary rounded-lg border border-border/50">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-primary font-medium">Theme</label>
+              <p class="text-muted text-xs mt-1">Color scheme for terminal sessions</p>
+            </div>
+            <select
+              id="settings-terminal-theme"
+              class="input-field py-2 px-3 text-sm w-48"
+              .value=${this.terminalTheme}
+              @change=${(e: Event) => {
+                const value = (e.target as HTMLSelectElement).value as TerminalThemeId;
+                this.terminalTheme = value;
+                this.terminalPrefs.setTheme(value);
+                window.dispatchEvent(new CustomEvent('terminal-theme-changed', { detail: value }));
+                logger.debug('Terminal theme changed to:', value);
+              }}
+            >
+              ${TERMINAL_THEMES.map(
+                (t) => html`
+                  <option value=${t.id} ?selected=${t.id === this.terminalTheme}>${t.name}</option>
+                `,
+              )}
+            </select>
+          </div>
+        </div>
+
+        <!-- Theme Preview -->
+        <div class="p-4 bg-bg-tertiary rounded-lg border border-border/50">
+          <div
+            id="theme-preview"
+            class="rounded-md p-3 font-mono text-xs leading-relaxed"
+            style="background: ${this.getPreviewColors().background}; color: ${this.getPreviewColors().foreground};"
+          >
+            <span style="color: ${this.getPreviewColors().green}">user@mac</span><span style="color: ${this.getPreviewColors().white}">:</span><span style="color: ${this.getPreviewColors().blue}">~/project</span><span style="color: ${this.getPreviewColors().white}">$ </span><span style="color: ${this.getPreviewColors().yellow}">ls</span>
+            <br>
+            <span style="color: ${this.getPreviewColors().cyan}">src/</span>  <span style="color: ${this.getPreviewColors().foreground}">README.md</span>  <span style="color: ${this.getPreviewColors().green}">package.json</span>
+            <br>
+            <span style="color: ${this.getPreviewColors().green}">user@mac</span><span style="color: ${this.getPreviewColors().white}">:</span><span style="color: ${this.getPreviewColors().blue}">~/project</span><span style="color: ${this.getPreviewColors().white}">$ </span><span class="animate-pulse" style="color: ${this.getPreviewColors().foreground};">_</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private getPreviewColors(): Record<string, string> {
+    const theme = TERMINAL_THEMES.find((t) => t.id === this.terminalTheme);
+    if (!theme || !theme.colors.background) {
+      // Fallback to dracula for 'auto' or missing themes
+      const dracula = TERMINAL_THEMES.find((t) => t.id === 'dracula');
+      return dracula?.colors ?? {};
+    }
+    return theme.colors;
   }
 
   private renderAppSettings() {
