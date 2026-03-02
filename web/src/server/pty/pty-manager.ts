@@ -1304,14 +1304,14 @@ export class PtyManager extends EventEmitter {
   /**
    * Update session name
    */
-  updateSessionName(sessionId: string, name: string): string {
+  async updateSessionName(sessionId: string, name: string): Promise<string> {
     logger.debug(
       `[PtyManager] updateSessionName called for session ${sessionId} with name: ${name}`
     );
 
     // Update in session manager (persisted storage) - get the unique name back
     logger.debug(`[PtyManager] Calling sessionManager.updateSessionName`);
-    const uniqueName = this.sessionManager.updateSessionName(sessionId, name);
+    const uniqueName = await this.sessionManager.updateSessionName(sessionId, name);
 
     // Update in-memory session if it exists
     const memorySession = this.sessions.get(sessionId);
@@ -1639,9 +1639,9 @@ export class PtyManager extends EventEmitter {
   /**
    * List all sessions (both active and persisted)
    */
-  listSessions() {
+  async listSessions() {
     // Update zombie sessions first and clean up socket connections
-    const zombieSessionIds = this.sessionManager.updateZombieSessions();
+    const zombieSessionIds = await this.sessionManager.updateZombieSessions();
     for (const sessionId of zombieSessionIds) {
       const socket = this.inputSocketClients.get(sessionId);
       if (socket) {
@@ -1652,7 +1652,7 @@ export class PtyManager extends EventEmitter {
 
     // Get all sessions from storage
     const now = Date.now();
-    return this.sessionManager.listSessions().map((session) => {
+    return (await this.sessionManager.listSessions()).map((session) => {
       const activeSession = this.sessions.get(session.id);
       const activityStatus = computeActivityStatus({
         status: session.status,
@@ -1747,7 +1747,7 @@ export class PtyManager extends EventEmitter {
   /**
    * Cleanup all exited sessions
    */
-  cleanupExitedSessions(): string[] {
+  async cleanupExitedSessions(): Promise<string[]> {
     return this.sessionManager.cleanupExitedSessions();
   }
 

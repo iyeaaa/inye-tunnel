@@ -201,7 +201,7 @@ export function createSessionRoutes(config: SessionRoutesConfig): Router {
       let allSessions = [];
 
       // Get local sessions
-      const localSessions = ptyManager.listSessions();
+      const localSessions = await ptyManager.listSessions();
       logger.debug(`[GET /sessions] Found ${localSessions.length} local sessions`);
 
       // Log session names for debugging
@@ -707,7 +707,7 @@ export function createSessionRoutes(config: SessionRoutesConfig): Router {
     logger.log(chalk.blue('cleaning up all exited sessions'));
     try {
       // Clean up local sessions
-      const localCleanedSessions = ptyManager.cleanupExitedSessions();
+      const localCleanedSessions = await ptyManager.cleanupExitedSessions();
       logger.log(chalk.green(`cleaned up ${localCleanedSessions.length} local exited sessions`));
 
       // Remove cleaned local sessions from remote registry if in HQ mode
@@ -1056,7 +1056,7 @@ export function createSessionRoutes(config: SessionRoutesConfig): Router {
 
       // Update the session name
       logger.debug(`[PATCH] Calling ptyManager.updateSessionName(${sessionId}, ${name})`);
-      const uniqueName = ptyManager.updateSessionName(sessionId, name);
+      const uniqueName = await ptyManager.updateSessionName(sessionId, name);
       logger.log(chalk.green(`[PATCH] Session ${sessionId} name updated to: ${uniqueName}`));
 
       res.json({ success: true, name: uniqueName });

@@ -247,7 +247,7 @@ export class SessionManager {
   }
 
   /**
-   * Load session info from JSON file
+   * Load session info from JSON file (sync version for backwards compatibility)
    */
   loadSessionInfo(sessionId: string): SessionInfo | null {
     const sessionJsonPath = path.join(this.controlPath, sessionId, 'session.json');
@@ -278,6 +278,38 @@ export class SessionManager {
   }
 
   /**
+   * Load session info from JSON file (async version - non-blocking)
+   */
+  async loadSessionInfoAsync(sessionId: string): Promise<SessionInfo | null> {
+    const sessionJsonPath = path.join(this.controlPath, sessionId, 'session.json');
+    try {
+      await fs.promises.access(sessionJsonPath);
+
+      const content = await fs.promises.readFile(sessionJsonPath, 'utf8');
+      const parsed = JSON.parse(content) as SessionInfo;
+
+      // Defensive: legacy session.json files might have unexpected types.
+      if (typeof parsed.gitRepoPath !== 'string') {
+        delete (parsed as Partial<SessionInfo>).gitRepoPath;
+      }
+      if (typeof parsed.gitMainRepoPath !== 'string') {
+        delete (parsed as Partial<SessionInfo>).gitMainRepoPath;
+      }
+      if (typeof parsed.gitBranch !== 'string') {
+        delete (parsed as Partial<SessionInfo>).gitBranch;
+      }
+
+      return parsed;
+    } catch (error) {
+      // ENOENT is expected when session.json doesn't exist
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn(`failed to load session info for ${sessionId}:`, error);
+      }
+      return null;
+    }
+  }
+
+  /**
    * Update session status
    */
   updateSessionStatus(sessionId: string, status: string, pid?: number, exitCode?: number): void {
@@ -303,8 +335,8 @@ export class SessionManager {
   /**
    * Ensure a session name is unique by adding a suffix if necessary
    */
-  private ensureUniqueName(desiredName: string, excludeSessionId?: string): string {
-    const sessions = this.listSessions();
+  private async ensureUniqueName(desiredName: string, excludeSessionId?: string): Promise<string> {
+    const sessions = await this.listSessions();
     let finalName = desiredName;
     let suffix = 2;
 
@@ -329,7 +361,7 @@ export class SessionManager {
   /**
    * Update session name
    */
-  updateSessionName(sessionId: string, name: string): string {
+  async updateSessionName(sessionId: string, name: string): Promise<string> {
     logger.debug(
       `[SessionManager] updateSessionName called for session ${sessionId} with name: ${name}`
     );
@@ -343,7 +375,7 @@ export class SessionManager {
     logger.debug(`[SessionManager] Current session info: ${JSON.stringify(sessionInfo)}`);
 
     // Ensure the name is unique
-    const uniqueName = this.ensureUniqueName(name, sessionId);
+    const uniqueName = await this.ensureUniqueName(name, sessionId);
 
     if (uniqueName !== name) {
       logger.debug(`[SessionManager] Name "${name}" already exists, using "${uniqueName}" instead`);
@@ -361,16 +393,20 @@ export class SessionManager {
   }
 
   /**
-   * List all sessions
+   * List all sessions (async - non-blocking I/O)
    */
-  listSessions(): Session[] {
+  async listSessions(): Promise<Session[]> {
     try {
-      if (!fs.existsSync(this.controlPath)) {
+      try {
+        await fs.promises.access(this.controlPath);
+      } catch {
         return [];
       }
 
       const sessions: Session[] = [];
-      const entries = fs.readdirSync(this.controlPath, { withFileTypes: true });
+      const entries = await fs.promises.readdir(this.controlPath, { withFileTypes: true });
+
+      logger.debug(`[listSessions] scanning ${entries.length} entries in control path`);
 
       for (const entry of entries) {
         if (entry.isDirectory()) {
@@ -378,7 +414,7 @@ export class SessionManager {
           const sessionDir = path.join(this.controlPath, sessionId);
           const stdoutPath = path.join(sessionDir, 'stdout');
 
-          const sessionInfo = this.loadSessionInfo(sessionId);
+          const sessionInfo = await this.loadSessionInfoAsync(sessionId);
           if (sessionInfo) {
             // Determine active state for running processes
             if (
@@ -411,10 +447,13 @@ export class SessionManager {
                 this.saveSessionInfo(sessionId, sessionInfo);
               }
             }
-            if (fs.existsSync(stdoutPath)) {
-              const lastModified = fs.statSync(stdoutPath).mtime.toISOString();
+
+            // Check stdout path asynchronously
+            try {
+              const stdoutStats = await fs.promises.stat(stdoutPath);
+              const lastModified = stdoutStats.mtime.toISOString();
               sessions.push({ ...sessionInfo, id: sessionId, lastModified });
-            } else {
+            } catch {
               sessions.push({ ...sessionInfo, id: sessionId, lastModified: sessionInfo.startedAt });
             }
           }
@@ -490,11 +529,11 @@ export class SessionManager {
   /**
    * Cleanup all exited sessions
    */
-  cleanupExitedSessions(): string[] {
+  async cleanupExitedSessions(): Promise<string[]> {
     const cleanedSessions: string[] = [];
 
     try {
-      const sessions = this.listSessions();
+      const sessions = await this.listSessions();
 
       for (const session of sessions) {
         if (session.status === 'exited' && session.id) {
@@ -519,7 +558,7 @@ export class SessionManager {
    * Cleanup sessions from old VibeTunnel versions
    * This is called during server startup to clean sessions when version changes
    */
-  cleanupOldVersionSessions(): { versionChanged: boolean; cleanedCount: number } {
+  async cleanupOldVersionSessions(): Promise<{ versionChanged: boolean; cleanedCount: number }> {
     const lastVersion = this.readLastVersion();
     const currentVersion = VERSION;
 
@@ -528,11 +567,11 @@ export class SessionManager {
       logger.debug('no previous version found, checking for legacy sessions');
 
       // First update zombie sessions to mark dead processes
-      this.updateZombieSessions();
+      await this.updateZombieSessions();
 
       // Clean up any sessions without version field that are also not active
       let cleanedCount = 0;
-      const sessions = this.listSessions();
+      const sessions = await this.listSessions();
       for (const session of sessions) {
         if (!session.version) {
           // Only clean if the session is not actively running
@@ -541,7 +580,9 @@ export class SessionManager {
             session.pid &&
             ProcessUtils.isProcessRunning(session.pid);
           if (!isActive) {
-            logger.debug(`cleaning up legacy zombie session ${session.id} (no version field, status: ${session.status}, pid: ${session.pid || 'none'})`);
+            logger.debug(
+              `cleaning up legacy zombie session ${session.id} (no version field, status: ${session.status}, pid: ${session.pid || 'none'})`
+            );
             this.cleanupSession(session.id);
             cleanedCount++;
           } else {
@@ -564,11 +605,11 @@ export class SessionManager {
     logger.log(chalk.yellow('cleaning up zombie sessions from old version...'));
 
     // First update zombie sessions to mark dead processes
-    this.updateZombieSessions();
+    await this.updateZombieSessions();
 
     let cleanedCount = 0;
     try {
-      const sessions = this.listSessions();
+      const sessions = await this.listSessions();
 
       for (const session of sessions) {
         // Only clean sessions that don't match the current version AND are not active
@@ -666,11 +707,11 @@ export class SessionManager {
   /**
    * Update sessions that have zombie processes
    */
-  updateZombieSessions(): string[] {
+  async updateZombieSessions(): Promise<string[]> {
     const updatedSessions: string[] = [];
 
     try {
-      const sessions = this.listSessions();
+      const sessions = await this.listSessions();
 
       for (const session of sessions) {
         if (session.status === 'running' && session.pid) {

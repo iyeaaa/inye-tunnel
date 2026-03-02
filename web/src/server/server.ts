@@ -526,7 +526,7 @@ export async function createApp(): Promise<AppInstance> {
 
   // Clean up sessions from old VibeTunnel versions
   const sessionManager = ptyManager.getSessionManager();
-  const cleanupResult = sessionManager.cleanupOldVersionSessions();
+  const cleanupResult = await sessionManager.cleanupOldVersionSessions();
   if (cleanupResult.versionChanged) {
     logger.log(
       chalk.yellow(

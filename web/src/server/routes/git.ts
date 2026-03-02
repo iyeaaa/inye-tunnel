@@ -212,7 +212,7 @@ export function createGitRoutes(): Router {
 
       // Get all sessions and find those within the repository path
       const sessionManager = new SessionManager();
-      const allSessions = sessionManager.listSessions();
+      const allSessions = await sessionManager.listSessions();
       const sessionsInRepo = allSessions.filter((session) => {
         if (!session.workingDir || !repoPath) return false;
         const sessionPath = path.resolve(session.workingDir);
@@ -303,7 +303,7 @@ export function createGitRoutes(): Router {
           }
 
           // Update the session name
-          sessionManager.updateSessionName(session.id, newTitle);
+          await sessionManager.updateSessionName(session.id, newTitle);
           updatedSessionIds.push(session.id);
 
           logger.debug(`Updated session ${session.id} title to: ${newTitle}`);

@@ -12,7 +12,7 @@ import { RepositoryService } from '../services/repository-service.js';
 import { ServerConfigService } from '../services/server-config-service.js';
 import { createLogger } from '../utils/logger.js';
 import { TerminalPreferencesManager } from '../utils/terminal-preferences.js';
-import { type TerminalThemeId, TERMINAL_THEMES } from '../utils/terminal-themes.js';
+import { TERMINAL_THEMES, type TerminalThemeId } from '../utils/terminal-themes.js';
 import { VERSION } from '../version.js';
 
 const logger = createLogger('settings');
@@ -719,7 +719,7 @@ export class Settings extends LitElement {
               ${TERMINAL_THEMES.map(
                 (t) => html`
                   <option value=${t.id} ?selected=${t.id === this.terminalTheme}>${t.name}</option>
-                `,
+                `
               )}
             </select>
           </div>

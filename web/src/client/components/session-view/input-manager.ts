@@ -276,7 +276,9 @@ export class InputManager {
 
     // Find the terminal container to position the IME input correctly
     // Use callback to get scoped container (supports split view with duplicate IDs)
-    const terminalContainer = this.callbacks?.getTerminalContainer?.() ?? document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
+    const terminalContainer =
+      this.callbacks?.getTerminalContainer?.() ??
+      document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
     if (!terminalContainer) {
       logger.warn('Terminal container not found, cannot setup IME input');
       return;
@@ -339,7 +341,12 @@ export class InputManager {
     // Block keyboard events during IME composition
     // e.key === 'Process' catches the first keydown before isComposing becomes true
     // e.keyCode === 229 is the standard IME composition keyCode across all browsers/platforms
-    if (e.isComposing || e.key === 'Process' || e.keyCode === 229 || this.imeInput?.isComposingText()) {
+    if (
+      e.isComposing ||
+      e.key === 'Process' ||
+      e.keyCode === 229 ||
+      this.imeInput?.isComposingText()
+    ) {
       return;
     }
 
@@ -766,7 +773,9 @@ export class InputManager {
    * Force setup IME input without language checks (used when composition is detected)
    */
   private forceSetupIMEInput(): void {
-    const terminalContainer = this.callbacks?.getTerminalContainer?.() ?? document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
+    const terminalContainer =
+      this.callbacks?.getTerminalContainer?.() ??
+      document.getElementById(TERMINAL_IDS.SESSION_TERMINAL);
     if (!terminalContainer) {
       logger.warn('Terminal container not found, cannot setup IME input');
       return;

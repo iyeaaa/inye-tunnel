@@ -104,6 +104,33 @@ export class VibeTunnelApp extends LitElement {
   private responsiveUnsubscribe?: () => void;
   private resizeCleanupFunctions: (() => void)[] = [];
   private sessionLoadingState: 'idle' | 'loading' | 'loaded' | 'not-found' = 'idle';
+  private isLoadingSessions = false;
+
+  /**
+   * Simple debounce utility - collapses multiple calls into one after delay
+   */
+  private debounce(fn: () => void, delayMs: number): () => void {
+    let timerId: number | null = null;
+    return () => {
+      if (timerId !== null) {
+        clearTimeout(timerId);
+      }
+      timerId = window.setTimeout(() => {
+        timerId = null;
+        fn();
+      }, delayMs);
+    };
+  }
+
+  /**
+   * Debounced version of loadSessions() for fire-and-forget call sites.
+   * Collapses rapid sequential calls (e.g., session-killed + status-changed)
+   * into a single loadSessions() call after 500ms.
+   */
+  private debouncedLoadSessions = this.debounce(() => {
+    console.debug('[App] debouncedLoadSessions triggered');
+    this.loadSessions();
+  }, 500);
 
   private isTestEnvironment(): boolean {
     return (
@@ -681,194 +708,210 @@ export class VibeTunnelApp extends LitElement {
   }
 
   private async loadSessions() {
-    // Only show loading state on initial load, not on refreshes
-    if (!this.initialLoadComplete) {
-      this.loading = true;
+    // Concurrency guard: prevent overlapping loadSessions() calls
+    if (this.isLoadingSessions) {
+      console.debug('[App] loadSessions() skipped - already loading');
+      return;
     }
+    this.isLoadingSessions = true;
+    console.debug('[App] loadSessions() started');
 
-    const performLoad = async () => {
-      try {
-        const headers = authClient.getAuthHeader();
-        const response = await fetch('/api/sessions', { headers });
-        if (response.ok) {
-          const newSessions = (await response.json()) as Session[];
+    try {
+      // Only show loading state on initial load, not on refreshes
+      if (!this.initialLoadComplete) {
+        this.loading = true;
+      }
 
-          // Preserve Git information and reuse existing session objects when possible
-          // This prevents unnecessary re-renders by maintaining object references
-          const updatedSessions = newSessions.map((newSession) => {
-            const existingSession = this.sessions.find((s) => s.id === newSession.id);
+      const performLoad = async () => {
+        try {
+          const headers = authClient.getAuthHeader();
+          const response = await fetch('/api/sessions', { headers });
+          if (response.ok) {
+            const newSessions = (await response.json()) as Session[];
 
-            if (existingSession) {
-              // Check if the session has actually changed
-              const hasChanges =
-                existingSession.status !== newSession.status ||
-                existingSession.name !== newSession.name ||
-                existingSession.workingDir !== newSession.workingDir ||
-                existingSession.exitCode !== newSession.exitCode ||
-                // Check if Git info has been added in the new data
-                (!existingSession.gitRepoPath && newSession.gitRepoPath) ||
-                // Don't check Git counts here - they are updated by git-status-badge component
-                // and we want to preserve those updates, not trigger re-renders
-                false;
+            // Preserve Git information and reuse existing session objects when possible
+            // This prevents unnecessary re-renders by maintaining object references
+            const updatedSessions = newSessions.map((newSession) => {
+              const existingSession = this.sessions.find((s) => s.id === newSession.id);
 
-              if (!hasChanges) {
-                // No changes - return the existing object reference
-                return existingSession;
+              if (existingSession) {
+                // Check if the session has actually changed
+                const hasChanges =
+                  existingSession.status !== newSession.status ||
+                  existingSession.name !== newSession.name ||
+                  existingSession.workingDir !== newSession.workingDir ||
+                  existingSession.exitCode !== newSession.exitCode ||
+                  // Check if Git info has been added in the new data
+                  (!existingSession.gitRepoPath && newSession.gitRepoPath) ||
+                  // Don't check Git counts here - they are updated by git-status-badge component
+                  // and we want to preserve those updates, not trigger re-renders
+                  false;
+
+                if (!hasChanges) {
+                  // No changes - return the existing object reference
+                  return existingSession;
+                }
+
+                // Merge changes, preserving Git info if not in new data
+                if (existingSession.gitRepoPath && !newSession.gitRepoPath) {
+                  logger.debug('[App] Preserving Git info for session', {
+                    sessionId: existingSession.id,
+                    gitRepoPath: existingSession.gitRepoPath,
+                    gitModifiedCount: existingSession.gitModifiedCount,
+                    gitUntrackedCount: existingSession.gitUntrackedCount,
+                  });
+                  // Update the existing session object in place to preserve reference
+                  existingSession.status = newSession.status;
+                  existingSession.name = newSession.name;
+                  existingSession.workingDir = newSession.workingDir;
+                  existingSession.exitCode = newSession.exitCode;
+                  existingSession.lastModified = newSession.lastModified;
+                  existingSession.active = newSession.active;
+                  existingSession.source = newSession.source;
+                  existingSession.remoteId = newSession.remoteId;
+                  existingSession.remoteName = newSession.remoteName;
+                  existingSession.remoteUrl = newSession.remoteUrl;
+                  // Git fields are already in existingSession, so we don't need to copy them
+                  return existingSession;
+                }
               }
 
-              // Merge changes, preserving Git info if not in new data
-              if (existingSession.gitRepoPath && !newSession.gitRepoPath) {
-                logger.debug('[App] Preserving Git info for session', {
-                  sessionId: existingSession.id,
-                  gitRepoPath: existingSession.gitRepoPath,
-                  gitModifiedCount: existingSession.gitModifiedCount,
-                  gitUntrackedCount: existingSession.gitUntrackedCount,
-                });
-                // Update the existing session object in place to preserve reference
-                existingSession.status = newSession.status;
-                existingSession.name = newSession.name;
-                existingSession.workingDir = newSession.workingDir;
-                existingSession.exitCode = newSession.exitCode;
-                existingSession.lastModified = newSession.lastModified;
-                existingSession.active = newSession.active;
-                existingSession.source = newSession.source;
-                existingSession.remoteId = newSession.remoteId;
-                existingSession.remoteName = newSession.remoteName;
-                existingSession.remoteUrl = newSession.remoteUrl;
-                // Git fields are already in existingSession, so we don't need to copy them
-                return existingSession;
-              }
+              // If newSession has Git data, ensure we create a complete session object
+              return newSession;
+            });
+
+            // Always assign a new array reference so Lit re-renders reliably.
+            // Note: we still preserve per-session object references above when possible.
+            this.sessions = [...updatedSessions];
+            // Clear session cache when sessions update
+            this._cachedSelectedSession = undefined;
+            this._cachedSelectedSessionId = null;
+            this.clearError();
+
+            // Prune split groups whose sessions no longer exist
+            this.pruneStaleGroups();
+
+            // Update page title if we're in list view
+            if (this.currentView === 'list') {
+              const sessionCount = this.sessions.length;
+              titleManager.setListTitle(sessionCount);
             }
 
-            // If newSession has Git data, ensure we create a complete session object
-            return newSession;
+            // Handle session loading state tracking
+            if (this.selectedSessionId && this.currentView === 'session') {
+              const sessionExists = this.sessions.find((s) => s.id === this.selectedSessionId);
+
+              if (sessionExists) {
+                // Session found - mark as loaded
+                if (this.sessionLoadingState !== 'loaded') {
+                  this.sessionLoadingState = 'loaded';
+                  logger.debug(`Session ${this.selectedSessionId} found and loaded`);
+                }
+              } else {
+                // Session not found - determine action based on loading state and load completion
+                if (this.sessionLoadingState === 'loaded') {
+                  // Session was previously loaded but is now missing (e.g., cleaned up)
+                  this.sessionLoadingState = 'not-found';
+                  logger.warn(
+                    `Session ${this.selectedSessionId} was loaded but is now missing (possibly cleaned up)`
+                  );
+                  this.showError(`Session ${this.selectedSessionId} not found`);
+                  this.handleNavigateToList();
+                } else if (this.sessionLoadingState === 'loading' && this.initialLoadComplete) {
+                  // We were loading and finished, but session still doesn't exist
+                  this.sessionLoadingState = 'not-found';
+                  logger.warn(
+                    `Session ${this.selectedSessionId} not found after loading completed`
+                  );
+                  this.showError(`Session ${this.selectedSessionId} not found`);
+                  this.handleNavigateToList();
+                } else if (this.sessionLoadingState === 'idle') {
+                  // First time checking - start loading
+                  this.sessionLoadingState = 'loading';
+                  logger.debug(`Looking for session ${this.selectedSessionId}...`);
+                }
+                // If state is 'loading' and !initialLoadComplete, just wait
+                // If state is 'not-found', we've already handled it
+              }
+            }
+          } else if (response.status === 401) {
+            // Authentication failed, redirect to login
+            this.handleLogout();
+            return;
+          } else {
+            this.showError('Failed to load sessions');
+          }
+        } catch (error) {
+          logger.error('error loading sessions:', error);
+          this.showError('Failed to load sessions');
+        } finally {
+          this.loading = false;
+          this.initialLoadComplete = true;
+        }
+      };
+
+      // Use view transition for initial load with fade effect
+      if (
+        !this.initialLoadComplete &&
+        !this.isTestEnvironment() &&
+        'startViewTransition' in document &&
+        typeof document.startViewTransition === 'function'
+      ) {
+        logger.log('🎨 Using View Transition API for initial session load');
+        // Add initial-load class for specific CSS handling
+        document.body.classList.add('initial-session-load');
+
+        const transition = document.startViewTransition(async () => {
+          await performLoad();
+          await this.updateComplete;
+        });
+
+        // Log when transition is ready
+        transition.ready
+          .then(() => {
+            logger.log('✨ Initial load view transition ready');
+          })
+          .catch((err) => {
+            // This is expected to fail in browsers that don't support View Transitions
+            logger.debug('View transition not supported or failed (this is normal):', err);
           });
 
-          // Always assign a new array reference so Lit re-renders reliably.
-          // Note: we still preserve per-session object references above when possible.
-          this.sessions = [...updatedSessions];
-          // Clear session cache when sessions update
-          this._cachedSelectedSession = undefined;
-          this._cachedSelectedSessionId = null;
-          this.clearError();
-
-          // Prune split groups whose sessions no longer exist
-          this.pruneStaleGroups();
-
-          // Update page title if we're in list view
-          if (this.currentView === 'list') {
-            const sessionCount = this.sessions.length;
-            titleManager.setListTitle(sessionCount);
-          }
-
-          // Handle session loading state tracking
-          if (this.selectedSessionId && this.currentView === 'session') {
-            const sessionExists = this.sessions.find((s) => s.id === this.selectedSessionId);
-
-            if (sessionExists) {
-              // Session found - mark as loaded
-              if (this.sessionLoadingState !== 'loaded') {
-                this.sessionLoadingState = 'loaded';
-                logger.debug(`Session ${this.selectedSessionId} found and loaded`);
-              }
-            } else {
-              // Session not found - determine action based on loading state and load completion
-              if (this.sessionLoadingState === 'loaded') {
-                // Session was previously loaded but is now missing (e.g., cleaned up)
-                this.sessionLoadingState = 'not-found';
-                logger.warn(
-                  `Session ${this.selectedSessionId} was loaded but is now missing (possibly cleaned up)`
-                );
-                this.showError(`Session ${this.selectedSessionId} not found`);
-                this.handleNavigateToList();
-              } else if (this.sessionLoadingState === 'loading' && this.initialLoadComplete) {
-                // We were loading and finished, but session still doesn't exist
-                this.sessionLoadingState = 'not-found';
-                logger.warn(`Session ${this.selectedSessionId} not found after loading completed`);
-                this.showError(`Session ${this.selectedSessionId} not found`);
-                this.handleNavigateToList();
-              } else if (this.sessionLoadingState === 'idle') {
-                // First time checking - start loading
-                this.sessionLoadingState = 'loading';
-                logger.debug(`Looking for session ${this.selectedSessionId}...`);
-              }
-              // If state is 'loading' and !initialLoadComplete, just wait
-              // If state is 'not-found', we've already handled it
-            }
-          }
-        } else if (response.status === 401) {
-          // Authentication failed, redirect to login
-          this.handleLogout();
-          return;
-        } else {
-          this.showError('Failed to load sessions');
-        }
-      } catch (error) {
-        logger.error('error loading sessions:', error);
-        this.showError('Failed to load sessions');
-      } finally {
-        this.loading = false;
-        this.initialLoadComplete = true;
-      }
-    };
-
-    // Use view transition for initial load with fade effect
-    if (
-      !this.initialLoadComplete &&
-      !this.isTestEnvironment() &&
-      'startViewTransition' in document &&
-      typeof document.startViewTransition === 'function'
-    ) {
-      logger.log('🎨 Using View Transition API for initial session load');
-      // Add initial-load class for specific CSS handling
-      document.body.classList.add('initial-session-load');
-
-      const transition = document.startViewTransition(async () => {
-        await performLoad();
-        await this.updateComplete;
-      });
-
-      // Log when transition is ready
-      transition.ready
-        .then(() => {
-          logger.log('✨ Initial load view transition ready');
-        })
-        .catch((err) => {
-          // This is expected to fail in browsers that don't support View Transitions
-          logger.debug('View transition not supported or failed (this is normal):', err);
-        });
-
-      // Clean up the class after transition completes
-      transition.finished
-        .finally(() => {
-          logger.log('✅ Initial load view transition finished');
-          document.body.classList.remove('initial-session-load');
-        })
-        .catch(() => {
-          // Ignore errors, just make sure we clean up
-          document.body.classList.remove('initial-session-load');
-        });
-    } else {
-      // Regular load without transition
-      if (!this.initialLoadComplete) {
-        logger.log('🎨 Using CSS animation fallback for initial load');
-        document.body.classList.add('initial-session-load');
-        await performLoad();
-        // Remove class after animation completes
-        setTimeout(() => {
-          document.body.classList.remove('initial-session-load');
-        }, 600);
+        // Clean up the class after transition completes
+        transition.finished
+          .finally(() => {
+            logger.log('✅ Initial load view transition finished');
+            document.body.classList.remove('initial-session-load');
+          })
+          .catch(() => {
+            // Ignore errors, just make sure we clean up
+            document.body.classList.remove('initial-session-load');
+          });
       } else {
-        await performLoad();
+        // Regular load without transition
+        if (!this.initialLoadComplete) {
+          logger.log('🎨 Using CSS animation fallback for initial load');
+          document.body.classList.add('initial-session-load');
+          await performLoad();
+          // Remove class after animation completes
+          setTimeout(() => {
+            document.body.classList.remove('initial-session-load');
+          }, 600);
+        } else {
+          await performLoad();
+        }
       }
+    } finally {
+      this.isLoadingSessions = false;
+      console.debug('[App] loadSessions() completed');
     }
   }
 
   private startAutoRefresh() {
     // Refresh sessions at configured interval for both list and session views
+    // Uses debounced version to avoid piling up requests when server is slow
     this.autoRefreshIntervalId = window.setInterval(() => {
       if (this.currentView === 'list' || this.currentView === 'session') {
-        this.loadSessions();
+        this.debouncedLoadSessions();
       }
     }, TIMING.AUTO_REFRESH_INTERVAL);
   }
@@ -928,11 +971,11 @@ export class VibeTunnelApp extends LitElement {
 
   private handleSessionKilled(e: CustomEvent) {
     logger.log(`session ${e.detail} killed`);
-    this.loadSessions(); // Refresh the list
+    this.debouncedLoadSessions(); // Refresh the list (debounced)
   }
 
   private handleRefresh() {
-    this.loadSessions();
+    this.debouncedLoadSessions();
   }
 
   private handleError(e: CustomEvent) {
@@ -1163,7 +1206,7 @@ export class VibeTunnelApp extends LitElement {
 
     // Ensure list view gets a fresh snapshot after leaving a session view.
     // This avoids stale session state if the PTY exited while we were connected.
-    this.loadSessions();
+    this.debouncedLoadSessions();
   }
 
   private async handleKillAll() {
@@ -1240,8 +1283,8 @@ export class VibeTunnelApp extends LitElement {
 
   private handleSessionStatusChanged(e: CustomEvent) {
     logger.log('Session status changed:', e.detail);
-    // Immediately refresh the session list to show updated status
-    this.loadSessions();
+    // Refresh the session list to show updated status (debounced to avoid piling up)
+    this.debouncedLoadSessions();
   }
 
   private handleMobileOverlayClick = (e: Event) => {
@@ -1374,7 +1417,9 @@ export class VibeTunnelApp extends LitElement {
     };
     this.splitGroups = [...this.splitGroups, group];
     this.saveSplitGroups();
-    logger.log(`Created split group: ${group.id} for sessions [${leftSessionId}, ${rightSessionId}]`);
+    logger.log(
+      `Created split group: ${group.id} for sessions [${leftSessionId}, ${rightSessionId}]`
+    );
     return group.id;
   }
 
@@ -1816,7 +1861,9 @@ export class VibeTunnelApp extends LitElement {
    * @param groupId Optional group ID to associate with this split (for restore scenarios).
    */
   private enterSplitMode(leftSessionId: string, rightSessionId: string, groupId?: string) {
-    logger.log(`Entering split mode: left=${leftSessionId}, right=${rightSessionId}, groupId=${groupId || 'none'}`);
+    logger.log(
+      `Entering split mode: left=${leftSessionId}, right=${rightSessionId}, groupId=${groupId || 'none'}`
+    );
     this.splitPanes = [{ sessionId: leftSessionId }, { sessionId: rightSessionId }];
     this.activePaneIndex = 0;
     this.splitRatio = SPLIT_PANE.DEFAULT_RATIO;

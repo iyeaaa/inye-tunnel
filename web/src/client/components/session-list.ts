@@ -890,14 +890,20 @@ export class SessionList extends LitElement {
                   ? html`
                     <div class="mb-6 mt-2">
                       <h3 class="text-xs font-semibold text-accent-primary uppercase tracking-wider mb-4">
-                        Split Groups <span class="text-text-dim">(${this.splitGroups.filter(
-                          (g) => persistedGroupSessionIds.has(g.sessionIds[0])
-                        ).length})</span>
+                        Split Groups <span class="text-text-dim">(${
+                          this.splitGroups.filter((g) =>
+                            persistedGroupSessionIds.has(g.sessionIds[0])
+                          ).length
+                        })</span>
                       </h3>
                       <div class="${this.compactMode ? '' : 'session-flex-responsive'}">
                         ${this.splitGroups.map((group) => {
-                          const leftSession = this.sessions.find((s) => s.id === group.sessionIds[0]);
-                          const rightSession = this.sessions.find((s) => s.id === group.sessionIds[1]);
+                          const leftSession = this.sessions.find(
+                            (s) => s.id === group.sessionIds[0]
+                          );
+                          const rightSession = this.sessions.find(
+                            (s) => s.id === group.sessionIds[1]
+                          );
                           if (!leftSession || !rightSession) return html``;
                           return html`
                             <split-group-card

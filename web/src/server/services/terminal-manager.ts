@@ -190,6 +190,9 @@ export class TerminalManager {
     },
   });
   private flowControlTimer?: NodeJS.Timeout;
+  // Cache for getTerminal() failures to avoid repeated failing calls
+  private static readonly FAILED_TERMINAL_CACHE_TTL = 30_000; // 30 seconds
+  private failedTerminalSessions: Map<string, number> = new Map();
 
   constructor(controlDir: string) {
     this.controlDir = controlDir;
@@ -397,43 +400,51 @@ export class TerminalManager {
         }
       }
 
-      // Watch for changes
+      // Watch for changes - use async I/O to avoid blocking the event loop
       sessionTerminal.watcher = fs.watch(streamPath, (eventType) => {
         if (eventType === 'change') {
-          try {
-            const stats = fs.statSync(streamPath);
-            if (stats.size > lastOffset) {
-              // Read only the new data
-              const fd = fs.openSync(streamPath, 'r');
-              const buffer = Buffer.alloc(stats.size - lastOffset);
-              fs.readSync(fd, buffer, 0, buffer.length, lastOffset);
-              fs.closeSync(fd);
+          (async () => {
+            try {
+              logger.debug(
+                `[watchStreamFile] fs.watch change event for session ${truncateForLog(sessionId)}`
+              );
+              const stats = await fs.promises.stat(streamPath);
+              if (stats.size > lastOffset) {
+                // Read only the new data using async file handle
+                const fileHandle = await fs.promises.open(streamPath, 'r');
+                try {
+                  const buffer = Buffer.alloc(stats.size - lastOffset);
+                  await fileHandle.read(buffer, 0, buffer.length, lastOffset);
 
-              // Update offset
-              lastOffset = stats.size;
-              sessionTerminal.lastFileOffset = lastOffset;
+                  // Update offset
+                  lastOffset = stats.size;
+                  sessionTerminal.lastFileOffset = lastOffset;
 
-              // Process new data
-              const newData = buffer.toString('utf8');
-              lineBuffer += newData;
+                  // Process new data
+                  const newData = buffer.toString('utf8');
+                  lineBuffer += newData;
 
-              // Process complete lines
-              const lines = lineBuffer.split('\n');
-              lineBuffer = lines.pop() || ''; // Keep incomplete line for next time
-              sessionTerminal.lineBuffer = lineBuffer;
+                  // Process complete lines
+                  const lines = lineBuffer.split('\n');
+                  lineBuffer = lines.pop() || ''; // Keep incomplete line for next time
+                  sessionTerminal.lineBuffer = lineBuffer;
 
-              for (const line of lines) {
-                if (line.trim()) {
-                  this.handleStreamLine(sessionId, sessionTerminal, line);
+                  for (const line of lines) {
+                    if (line.trim()) {
+                      this.handleStreamLine(sessionId, sessionTerminal, line);
+                    }
+                  }
+                } finally {
+                  await fileHandle.close();
                 }
               }
+            } catch (error) {
+              logger.error(
+                `Error reading stream file for session ${truncateForLog(sessionId)}:`,
+                error
+              );
             }
-          } catch (error) {
-            logger.error(
-              `Error reading stream file for session ${truncateForLog(sessionId)}:`,
-              error
-            );
-          }
+          })();
         }
       });
 
@@ -749,12 +760,23 @@ export class TerminalManager {
    * Get buffer snapshot for a session - always returns full terminal buffer (cols x rows)
    */
   async getBufferSnapshot(sessionId: string): Promise<BufferSnapshot> {
+    // Check failure cache to avoid repeated failing getTerminal() calls
+    const failedAt = this.failedTerminalSessions.get(sessionId);
+    if (failedAt && Date.now() - failedAt < TerminalManager.FAILED_TERMINAL_CACHE_TTL) {
+      logger.debug(
+        `[getBufferSnapshot] skipping session ${truncateForLog(sessionId)} - terminal init failed ${Math.round((Date.now() - failedAt) / 1000)}s ago`
+      );
+      return this.buildFallbackSnapshot(sessionId);
+    }
+
     const startTime = Date.now();
     let terminal: GhosttyTerminal;
     try {
       terminal = await this.getTerminal(sessionId);
     } catch (error) {
       logger.error(`Failed to init terminal for snapshot ${truncateForLog(sessionId)}:`, error);
+      // Cache the failure to avoid repeated attempts
+      this.failedTerminalSessions.set(sessionId, Date.now());
       return this.buildFallbackSnapshot(sessionId);
     }
 
@@ -1175,6 +1197,9 @@ export class TerminalManager {
       // Clear write queue
       this.writeQueues.delete(sessionId);
 
+      // Clear failure cache entry for this session
+      this.failedTerminalSessions.delete(sessionId);
+
       logger.log(chalk.yellow(`Terminal closed for session ${truncateForLog(sessionId)}`));
     }
   }
@@ -1295,11 +1320,22 @@ export class TerminalManager {
     sessionId: string,
     listener: BufferChangeListener
   ): Promise<() => void> {
+    // Check failure cache to avoid repeated failing getTerminal() calls
+    const failedAt = this.failedTerminalSessions.get(sessionId);
+    if (failedAt && Date.now() - failedAt < TerminalManager.FAILED_TERMINAL_CACHE_TTL) {
+      logger.debug(
+        `[subscribeToBufferChanges] skipping session ${truncateForLog(sessionId)} - terminal init failed ${Math.round((Date.now() - failedAt) / 1000)}s ago`
+      );
+      return () => {};
+    }
+
     // Ensure terminal exists and is watching
     try {
       await this.getTerminal(sessionId);
     } catch (error) {
       logger.error(`Failed to init terminal for subscription ${truncateForLog(sessionId)}:`, error);
+      // Cache the failure to avoid repeated attempts
+      this.failedTerminalSessions.set(sessionId, Date.now());
       // Terminal is unavailable - return empty unsubscribe instead of continuing
       // to call getBufferSnapshot() which would fail the same way
       return () => {};
