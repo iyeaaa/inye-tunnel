@@ -1,0 +1,24 @@
+{
+  "name": "node-pty",
+  "version": "1.0.0",
+  "description": "Minimal PTY implementation without threading - vendored from node-pty",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "tsc && node-gyp rebuild",
+    "clean": "rimraf lib build",
+    "install": "node-gyp rebuild"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "node-gyp": "^12.1.0",
+    "prebuild": "^13.0.1",
+    "rimraf": "^6.1.2",
+    "typescript": "^5.9.3"
+  },
+  "gypfile": true,
+  "license": "MIT"
+}
